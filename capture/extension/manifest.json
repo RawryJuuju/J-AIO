@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "J-AIO Capture (Zyper Capture parity)",
+  "version": "1.0.0",
+  "description": "Captures eth_sendTransaction calls from mint sites and pushes them to J-AIO (:8899).",
+  "permissions": [],
+  "host_permissions": ["http://127.0.0.1:8899/*", "http://localhost:8899/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["inject.js", "content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

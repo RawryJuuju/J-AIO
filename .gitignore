@@ -1,0 +1,11 @@
+# Never commit secrets or vault artifacts
+node_modules/
+data/
+data-backup/
+logs/
+*.dat
+*.verify
+*.log
+*.csv
+.env
+.env.*

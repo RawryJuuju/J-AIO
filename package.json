@@ -1,0 +1,21 @@
+{
+  "name": "j-aio",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@scure/bip32": "1.5.0",
+    "@scure/bip39": "1.4.0",
+    "@scure/btc-signer": "1.4.0",
+    "@solana/web3.js": "1.98.4",
+    "bs58": "6.0.0",
+    "ethers": "6.17.0",
+    "undici": "6.28.0"
+  }
+}
