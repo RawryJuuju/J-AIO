@@ -273,7 +273,7 @@ page('gas', {
     };
     $('gGo').onclick();
     $('uTsToDate').onclick = () => {
-      const s = $('uTs').value.trim(); if (!/^\d{9,11}$/.test(s)) return err('Unix', 'timestamp harus 10-11 digit');
+      const s = $('uTs').value.trim(); if (!/^\d{9,11}$/.test(s)) return err('Unix', 'timestamp must be 10-11 digits');
       const d = new Date(Number(s) * 1000); const wib = new Date(d.getTime());
       $('uOut').textContent = `${s} → ${wib.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })} WIB`;
     };
