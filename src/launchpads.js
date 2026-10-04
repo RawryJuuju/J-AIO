@@ -366,51 +366,7 @@ async function launchmynft(url) {
       suggested: { function: 'mint(uint256)', params: ['{amount}'] },
     };
   }
-  // Resolve the public page first. This is read-only and supplies exact collection metadata.
-  // Path shape verified from Zyper binary (UI regex `(?:www\.)?launchmynft\.io\/(?:mint|sol)\/[a-z0-9_-]+`).
-  if (!/^https:\/\/(?:www\.)?launchmynft\.io\/(?:collections|mint|sol)\/[a-z0-9_-]+(?:\/[^/?#]*)?(?:[?#].*)?$/i.test(url)) throw new Error('bad LaunchMyNFT URL');
-  const page = await j(url, { headers: { accept: 'text/html' } });
-  if (!page.ok || !/<(?:!doctype\s+html|html|script\b)/i.test(page.text.slice(0, 4096))) throw new Error(`LaunchMyNFT page HTTP ${page.status}`);
-  let collection = null;
-  const nd = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/.exec(page.text || '');
-  if (nd) { try { collection = JSON.parse(nd[1]).props?.pageProps?.collection || null; } catch { /* malformed SSR */ } }
-  if (!collection || typeof collection !== 'object') throw new Error('LaunchMyNFT collection metadata unavailable');
-  const required = ['owner', 'documentId', 'collectionMint', 'version', 'type'];
-  if (required.some((key) => typeof collection[key] !== 'string' || !collection[key])) throw new Error('LaunchMyNFT collection schema incomplete');
-  if (collection.type.toLowerCase() !== 'solana') throw new Error('LaunchMyNFT collection chain mismatch');
-  const version = collection.version.toLowerCase();
-  if (version !== 'candy' && version !== 'core') throw new Error('LaunchMyNFT collection version unknown');
-  // Zyper binary parity gate (string dump line 35941): `LaunchMyNFT version %q is not
-  // supported yet (Core and CV2 only)` — Core + Candy V2 are the supported task types;
-  // current site bundles expose mintV6 for newer candy machines. Both mirror paths are
-  // simulate-only here; whitelist phases gate (line 36027: `only public and wallet
-  // allowlist phases are supported`) — no proof API exists, list lives in Firestore.
-  const stage = {
-    id: '0', name: 'Public', price: collection.cost ?? null, isPublic: true,
-    maxSupply: collection.maxSupply ?? null, totalMints: collection.totalMints ?? null,
-    soldOut: collection.hasSoldEnough === true
-      // SSR: hasSoldEnough=true is set when sold quota reached (incl. fully sold 1.0 fraction)
-      || (Number.isFinite(Number(collection.fractionMinted)) && Number(collection.fractionMinted) >= 1)
-      || (Number.isFinite(Number(collection.totalMints)) && Number.isFinite(Number(collection.maxSupply)) && Number(collection.totalMints) >= Number(collection.maxSupply)),
-  };
-  const lmn = require('./lmnsol');
-  const blueprint = {
-    program: version === 'candy' ? lmn.LEGACY_CANDY : lmn.CANDY_PROGRAM,
-    requiredSigner: lmn.REQUIRED_SIGNER,
-    relay: lmn.RELAY_URL,
-    machine: collection.newCandyMachineAccountId || null,
-    collectionMint: collection.collectionMint || null,
-    machineName: null, // on-chain Candy V4+ name = machine.toBase58().slice(0,6) (uuid), verified in bundle
-    simulateOnly: true,
-  };
-  return {
-    platform: 'launchmynft-sol', chain: 'solana', creator: a, collectionHash: b,
-    collection, mintMethod: 'simulate-only', stages: [stage], blueprint,
-    requiredSigner: lmn.REQUIRED_SIGNER,
-    note: version === 'candy'
-      ? 'Candy: mintV6/mintV2 builders verified (bundle 8242/5060): legacy program ArAA6, wallet2=fee 33nQ. Simulate-only.'
-      : 'Core mint remains platform-locked until exact mintMachine accounts/IX are verified.',
-  }; 
+  throw new Error('LaunchMyNFT Solana collections are not supported');
 }
 
 /* ---------------- Zora ---------------- */

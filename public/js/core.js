@@ -16,7 +16,6 @@ function page(key, def) { PAGES[key] = def; }
 const ICON_PATHS = {
   dash: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   mint: '<path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9z"/><path d="M12 21.5v-9M21 7.5l-9 5-9-5"/>',
-  solmint: '<path d="M5 7.5h11l3-3H8z"/><path d="M5 19.5h11l3-3H8z"/><path d="M19 13.5H8l-3-3h11z"/>',
   gas: '<path d="M4 21V5.5A2.5 2.5 0 0 1 6.5 3h4A2.5 2.5 0 0 1 13 5.5V21"/><path d="M3 21h11M4 11h9"/><path d="M13 8h3a2 2 0 0 1 2 2v6.5a2 2 0 0 0 2 2 2 2 0 0 0 2-2V11l-2.5-3"/>',
   inv: '<path d="M3 8.5 12 3.5l9 5v7L12 20.5l-9-5z"/><path d="M3 8.5 12 13.5l9-5M12 13.5v7"/>',
   floor: '<path d="M3 20V9l5-3 5 3 5-2.5 3 1.5V20z"/><path d="M8 20v-7M13 20v-8M18 20v-6"/>',

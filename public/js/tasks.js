@@ -6,7 +6,7 @@ page('tasks', {
   render(el) {
     el.innerHTML = `
       <h2 class="pt">Tasks Dashboard</h2>
-      <p class="ps">Manage all active tasks (EVM Mint, Solana Mint, Sniper) in one place.</p>
+      <p class="ps">Manage all active tasks (EVM Mint, Sniper) in one place.</p>
       
       <div class="card">
         <h3>Task Overview <span class="sub" id="tsCount"></span>

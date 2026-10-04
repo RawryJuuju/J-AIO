@@ -16,7 +16,6 @@ const accounts = require('./accounts');
 const abiMod = require('./abi');
 const launchpads = require('./launchpads');
 const mint = require('./mint');
-const solmint = require('./solmint');
 const nftops = require('./nftops');
 const nftview = require('./nftview');
 const sniper = require('./sniper');
@@ -84,7 +83,6 @@ function sseSend(payload) {
 }
 
 mint.bus.on('event', (e) => sseSend({ kind: 'mint', ...e }));
-solmint.bus.on('event', (e) => sseSend({ kind: 'sol', ...e }));
 xmodule.bus.on('event', (e) => sseSend({ kind: 'x', ...e }));
 submit.bus.on('event', (e) => sseSend({ kind: 'submit', ...e }));
 wl.bus.on('event', (e) => sseSend({ kind: 'wl', ...e }));
@@ -310,18 +308,13 @@ const routes = {
   ),
 
   'POST /api/mint/stop': async (b) => ({ ok: mint.stop(b.runId) }),
-  'POST /api/mint/stop-all': async () => ({ stopped: mint.stopAll() + solmint.stopAll() }),
+  'POST /api/mint/stop-all': async () => ({ stopped: mint.stopAll() }),
   'GET /api/mint/runs': async () => mint.list(),
   'GET /api/mint/status': async (b, q) => mint.status(q.runId),
   'GET /api/mint/events': async (b, q) => mint.events(q.runId, q.since ? Number(q.since) : null),
   'POST /api/mint/clear': async () => ({ cleared: mint.clearFinished() }),
   'POST /api/gas': async (b) => mint.gasCalc(b.chain, b.gasLimit, b.gweis, b.nftCount, b.pricePerNft),
 
-  /* --- solana mint --- */
-  'POST /api/sol/start': async (b) => solmint.start(b),
-  'POST /api/sol/stop': async (b) => ({ ok: solmint.stop(b.runId) }),
-  'GET /api/sol/runs': async () => solmint.list(),
-  'GET /api/sol/status': async (b, q) => solmint.status(q.runId),
 
   /* --- nft ops --- */
   'POST /api/nft/inventory': async (b) => nftops.inventory(b.chain, b.addresses, b),

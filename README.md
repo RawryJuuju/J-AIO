@@ -1,6 +1,6 @@
 # J-AIO
 
-**Multi-wallet NFT automation suite** — minting, encrypted wallet vault, whitelist eligibility checking, PnL analytics, and collection operations across **Robinhood Chain**, **EVM chains**, and **Solana**.
+**Multi-wallet NFT automation suite** — minting, encrypted wallet vault, whitelist eligibility checking, PnL analytics, and collection operations across **Robinhood Chain** and **EVM chains** (plus Solana wallet operations in the vault).
 
 Single self-hosted service: plain Node.js backend (no framework) + vanilla JS single-page frontend, bound to `localhost`.
 
@@ -20,11 +20,11 @@ Single self-hosted service: plain Node.js backend (no framework) + vanilla JS si
 │  - vault-locked by default (423 until unlock)   │
 │  - mutating routes require session token        │
 │  - module registry (mint, wallets, wl, ...)     │
-└───────┬──────────────┬──────────────┬───────────┘
-        │              │              │
-   EVM RPCs       Solana RPC      Marketplace APIs
- (Robinhood 4663, (candy machine) (Blockscout,
-  ETH, Base, ...)                  OpenSea, Scatter)
+└───────┬─────────────────────────────┬───────────┘
+        │                             │
+   EVM RPCs                    Marketplace APIs
+ (Robinhood 4663,              (Blockscout,
+  ETH, Base, ...)               OpenSea, Scatter)
 ```
 
 - **No framework** — raw `http` server, module-based route registry (`src/*.js` each export their routes)
@@ -59,7 +59,6 @@ Single self-hosted service: plain Node.js backend (no framework) + vanilla JS si
 |---|---|
 | **EVM Mint** | Full multi-wallet mint engine (see [Mint engine](#mint-engine) below) |
 | **Quick Mint** | Streamlined single-collection mint flow with minimal configuration |
-| **Solana Mint** | Candy machine mints: legacy 14-account path and current 32-account `mintV2` program (compressed NFTs, bubblegum tree accounts), per-wallet execution |
 | **Check Eligible** | Batch eligibility checks for OpenSea drops / Scatter collections |
 | **Tasks** | Task manager: queued and scheduled automation runs |
 
@@ -78,7 +77,7 @@ Single self-hosted service: plain Node.js backend (no framework) + vanilla JS si
 
 | Page | Description |
 |---|---|
-| **Wallets** | Vault management: generate, import, export, rename, bulk rename, groups, balance refresh |
+| **Wallets** | Vault management: generate, import, export, rename, bulk rename, groups, balance refresh (EVM, Solana, Bitcoin keys) |
 | **Delegation Scan** | Scans all wallets for active token approvals/delegations; one-click revoke |
 
 ### Identity
@@ -134,7 +133,6 @@ src/                 backend modules
   wallets.js         wallet CRUD, generation, disperse/consolidate
   mint.js            EVM mint engine (preflight, broadcast, throttle modes)
   launchpads.js      launchpad resolvers (SeaDrop/Manifold/Scatter/Transient/OpenSea)
-  solmint.js         Solana candy-machine mint planner
   wl.js              whitelist checker engine
   nftview.js         inventory, transfers
   nftops.js          listings, offers, sweep, floor war
