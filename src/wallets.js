@@ -554,7 +554,6 @@ async function consolidate(chainKey, walletIds, destination, opts = {}) {
   const maxFeePerGas = opts.maxFeePerGas ? ethers.parseUnits(String(opts.maxFeePerGas), 'gwei') : fee.maxFeePerGas;
   const maxPriorityFeePerGas = opts.maxPriorityFeePerGas ? ethers.parseUnits(String(opts.maxPriorityFeePerGas), 'gwei') : fee.maxPriorityFeePerGas;
   const leave = opts.leave ? ethers.parseEther(String(opts.leave)) : 0n;
-  const minB = opts.minBalance ? ethers.parseEther(String(opts.minBalance)) : 0n;
   const tokenAddr = opts.token ? addr(String(opts.token), 'token') : null;
   let decimals = 18, fmt;
   if (tokenAddr) {
@@ -584,7 +583,6 @@ async function consolidate(chainKey, walletIds, destination, opts = {}) {
           out.push({ address: w.address, amount: fmt(bal), token: tokenAddr, hash: res.hash });
         } else {
           const bal = await p.getBalance(w.address);
-          if (bal < minB) { out.push({ address: w.address, skipped: 'below min' }); return; }
           let gasLimit = 21000n;
           try { const est = await p.estimateGas({ from: w.address, to: destination, value: 0n }); if (est > gasLimit) gasLimit = est; }
           catch { /* keep */ }

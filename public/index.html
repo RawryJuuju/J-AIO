@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>JuujuTools</title>
+<script>
+/* theme bootstrap: apply the saved theme before first paint to avoid a flash */
+try {
+  var __t = localStorage.getItem('jaio_theme');
+  if (__t === 'light' || __t === 'night') document.documentElement.setAttribute('data-theme', __t);
+} catch (e) {}
+</script>
 <link rel="icon" type="image/webp" href="logo.webp">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

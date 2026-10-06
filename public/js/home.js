@@ -31,6 +31,30 @@ page('home', {
         </div>
       </div>
 
+      <div class="card">
+        <h3>${icon('pnl')} Coin price check <span class="sub" id="fxInfo"></span>
+          <span style="margin-left:auto"><button class="btn xs ghost" id="fxRefresh">Refresh rate</button></span>
+        </h3>
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:1;min-width:170px">
+            <label class="f" id="fxAmtLabel">Amount (ETH)</label>
+            <input id="fxAmt" type="number" step="any" min="0" placeholder="0.00" class="mono" autocomplete="off">
+          </div>
+          <div style="min-width:230px">
+            <label class="f">Direction</label>
+            <div class="seg-row" id="fxDir">
+              <button type="button" data-d="eth" class="on">ETH → USD</button>
+              <button type="button" data-d="usd">USD → ETH</button>
+            </div>
+          </div>
+          <div style="flex:1.2;min-width:210px">
+            <label class="f">Result</label>
+            <div id="fxOut" class="bignum" style="font-size:22px">—</div>
+            <div class="sm mut" id="fxSub"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid g2 eq" style="margin-bottom:var(--s4)">
         <div class="card flex">
           <h3>${icon('pnl')} All-time PnL <span class="sub" id="hPnlAt"></span></h3>
@@ -69,6 +93,51 @@ page('home', {
     }
     $('hGo').onclick = launch;
     $('hUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') launch(); });
+
+    /* ---------- coin price check (ETH <-> USD, Coinbase spot via /api/fx) ----------
+       Rates come from the shared fxrate cache (5-min TTL, Coinbase ETH-USD +
+       USD-IDR), so the converter always agrees with the header ticker and the
+       PnL USD numbers. IDR is shown as a bonus line on every result. */
+    let fxRate = { ethUsd: S.ethUsd, usdIdr: S.usdIdr, at: null };
+    let fxDirection = 'eth';
+
+    function fxRender() {
+      const r = fxRate.ethUsd;
+      $('fxInfo').textContent = r
+        ? `1 ETH = $${num(r, 2)}${fxRate.usdIdr ? ` · $1 = ${idr(fxRate.usdIdr)}` : ''}${fxRate.at ? ` · updated ${ago(fxRate.at)} ago` : ''}`
+        : 'rate unavailable';
+      const raw = $('fxAmt').value.trim();
+      const v = Number(raw);
+      if (raw === '' || !isFinite(v) || !r) { $('fxOut').textContent = '—'; $('fxSub').textContent = ''; return; }
+      if (fxDirection === 'eth') {
+        const usd = v * r;
+        $('fxOut').textContent = `$${num(usd, 2)}`;
+        $('fxSub').textContent = `${num(v, 6)} ETH${fxRate.usdIdr ? ` · ${idr(usd * fxRate.usdIdr)}` : ''}`;
+      } else {
+        const eth = v / r;
+        $('fxOut').textContent = `${num(eth, 6)} ETH`;
+        $('fxSub').textContent = `$${num(v, 2)}${fxRate.usdIdr ? ` · ${idr(v * fxRate.usdIdr)}` : ''}`;
+      }
+    }
+    async function fxLoad(force) {
+      try {
+        const r = await api('/fx' + (force ? '?force=1' : ''));
+        if (r.ethUsd) { fxRate = r; S.ethUsd = r.ethUsd; if (r.usdIdr) S.usdIdr = r.usdIdr; }
+      } catch { /* locked or offline — fall back to cached S rates */ }
+      fxRender();
+    }
+    qa('#fxDir button').forEach((b) => {
+      b.onclick = () => {
+        fxDirection = b.dataset.d;
+        qa('#fxDir button').forEach((x) => x.classList.toggle('on', x === b));
+        $('fxAmtLabel').textContent = fxDirection === 'eth' ? 'Amount (ETH)' : 'Amount (USD)';
+        $('fxAmt').placeholder = fxDirection === 'eth' ? '0.00' : '0';
+        fxRender();
+      };
+    });
+    $('fxAmt').addEventListener('input', fxRender);
+    $('fxRefresh').onclick = () => fxLoad(true);
+    fxLoad(false);
 
     function pnlBox(p) {
       if (!p || !p.totals) {

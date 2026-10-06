@@ -12,6 +12,21 @@ const S = {
 const PAGES = {};   // key -> {label, group, icon, render(el)}
 function page(key, def) { PAGES[key] = def; }
 
+/* ---------- theme (night / light) ----------
+   data-theme on <html> drives the CSS variable blocks. localStorage is the
+   source of truth (applied pre-paint by the inline bootstrap in index.html,
+   works before unlock); the value is mirrored to server settings so it
+   survives a browser-profile wipe. */
+function currentTheme() {
+  const t = document.documentElement.getAttribute('data-theme');
+  return t === 'light' ? 'light' : 'night';
+}
+function applyTheme(t) {
+  if (t !== 'light' && t !== 'night') t = 'night';
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('jaio_theme', t); } catch (e) { /* private mode */ }
+}
+
 /* ---------- icon set (single stroked family, 24x24) ---------- */
 const ICON_PATHS = {
   dash: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -28,6 +43,8 @@ const ICON_PATHS = {
   rpc: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/>',
   chains: '<path d="M9.5 14.5 7 17a3.5 3.5 0 0 1-5-5l2.5-2.5"/><path d="M14.5 9.5 17 7a3.5 3.5 0 0 1 5 5l-2.5 2.5"/><path d="M9 15l6-6"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.2 7l2.6 1.5M17.2 15.5l2.6 1.5M4.2 17l2.6-1.5M17.2 8.5l2.6-1.5"/>',
+  moon: '<path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a7 7 0 0 0 9.7 9.7z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
   logs: '<path d="M5 3.5h14v17H5z"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/>',
   runs: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
   feed: '<path d="M3 12h4l2.5-5 3 10 2.5-5H21"/>',

@@ -328,6 +328,16 @@ page('settings', {
       <h2 class="pt">Settings</h2>
       <p class="ps">API keys, wallet keys, and account tokens are all AES-256-GCM encrypted in the vault.</p>
 
+      <div class="card"><h3>Appearance</h3>
+        <div class="row" style="align-items:center;gap:var(--s4)">
+          <div style="min-width:150px"><label class="f" style="margin-bottom:2px">Theme</label><span class="sm mut">Applies instantly · saved on this device</span></div>
+          <div class="seg-row" id="thSeg" style="max-width:380px;flex:1">
+            <button type="button" data-th="night">${icon('moon')} Night <span class="sc">dark · low glare</span></button>
+            <button type="button" data-th="light">${icon('sun')} Light <span class="sc">bright workspace</span></button>
+          </div>
+        </div>
+      </div>
+
       <div class="card"><h3>API keys
         <div style="margin-left:auto" class="row">
           <span class="sm mut" id="stKeysDirty"></span>
@@ -508,6 +518,11 @@ page('settings', {
     async function load() {
       const s = await api('/settings');
       S.settings = s;
+      /* Server-stored theme applies only when this browser has no local choice yet */
+      try {
+        if (!localStorage.getItem('jaio_theme') && (s.theme === 'light' || s.theme === 'night')) applyTheme(s.theme);
+      } catch (e) { /* private mode */ }
+      syncThemeSeg();
       FIELDS.forEach(([id, key]) => { $(id).value = s[key] == null ? '' : s[key]; });
       $('stPubRpc').checked = s.publicRpcOnly !== false;
       renderPools(s, null);
@@ -572,6 +587,21 @@ page('settings', {
     $('stLock').onclick = () => confirmBox('Lock the vault?',
       'All decrypted keys are dropped from memory. Active runs keep going but new signing will fail until you unlock again.',
       async () => { await api('/lock', {}); showLock('Locked. Enter password to unlock.'); }, 'Lock now');
+
+    /* Theme switcher (night / light) — instant apply, localStorage primary,
+       mirrored to server settings as a backup. */
+    function syncThemeSeg() {
+      const cur = currentTheme();
+      qa('#thSeg button').forEach((b) => b.classList.toggle('on', b.dataset.th === cur));
+    }
+    qa('#thSeg button').forEach((b) => {
+      b.onclick = () => {
+        applyTheme(b.dataset.th);
+        syncThemeSeg();
+        api('/settings', { theme: b.dataset.th }).catch(() => { /* localStorage already updated */ });
+      };
+    });
+    syncThemeSeg();
 
     load();
   },

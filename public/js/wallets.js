@@ -642,7 +642,6 @@ function consolidateModal() {
     ${WK === 'evm' ? `<label class="f" style="margin-top:var(--s3)">ERC-20 token <span class="opt">— blank = sweep native</span></label><input id="csTok" class="mono" placeholder="0x…">` : ''}
     <div class="grid g2" style="margin-top:var(--s3)">
       <div><label class="f">Leave behind <span class="opt">— dust buffer (native)</span></label><input id="csKeep" placeholder="0"></div>
-      <div><label class="f">Min balance to bother</label><input id="csMin" placeholder="0.0005" value="0.0005"></div>
     </div>
     <div class="infobox" style="margin-top:var(--s3)">Sends the full balance minus gas from every wallet in the group. Token mode sweeps the whole token balance (gas still paid in native).</div>
     <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" id="csGo">Consolidate</button></div>`);
@@ -655,7 +654,7 @@ function consolidateModal() {
       const r = await api('/wallets/consolidate', {
         kind: WK, chain: $('csChain') ? $('csChain').value : undefined,
         walletIds: ids, destination: $('csTo').value.trim(),
-        leave: $('csKeep').value || null, minBalance: $('csMin').value || null,
+        leave: $('csKeep').value || null,
         token: $('csTok') ? ($('csTok').value.trim() || undefined) : undefined,
       });
       closeModal();
