@@ -567,16 +567,12 @@ function disperseModal() {
     <label class="f" style="margin-top:var(--s3)">Or explicit targets <span class="opt">— address,amount per line</span></label>
     <textarea id="dsT" rows="6" placeholder="0xabc…,0.01"></textarea>
     ${picks}
-    ${WK === 'evm' ? '<label class="chk" style="margin-top:var(--s2)"><input type="checkbox" id="dsMulti" checked> Use Disperse contract (1 tx, cheaper)</label>' : ''}
+    <div class="infobox" style="margin-top:var(--s2)">Sends one direct transaction per recipient, signed locally — no third-party disperse contract is ever touched.</div>
     <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" id="dsGo">Disperse</button></div>`);
   const amtSel = $('dsAmtMode');
   const syncAmt = () => { $('dsRngWrap').style.display = amtSel.value === 'random' ? '' : 'none'; if (amtSel.value !== 'fixed') $('dsAmt').value = ''; };
   amtSel.onchange = syncAmt;
   document.querySelectorAll('.chiprow .chip').forEach((b) => b.onclick = () => { $('dsTok').value = b.dataset.t; });
-  /* Zyper defaultDisperse setting: checkbox remembers last choice across modals */
-  api('/settings').then((s) => { const c = $('dsMulti'); if (c) c.checked = s.defaultDisperse !== false; }).catch(() => {});
-  const dmChk = $('dsMulti');
-  if (dmChk) dmChk.onchange = () => { api('/settings', { defaultDisperse: dmChk.checked }).catch(() => {}); };
   $('dsGo').onclick = async () => {
     const b = $('dsGo'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
     try {
@@ -606,27 +602,16 @@ function disperseModal() {
       }
       const summary = targets.map((t) => `${t.address} = ${randomMin != null ? randomMin + '–' + randomMax : amountMode === 'max' ? 'max' : t.amount}`).join('\n');
       if (!confirm(`Confirm EXACT recipients (${targets.length}) and amount:\n\n${summary}`)) throw new Error('cancelled');
-      let r = await api('/wallets/disperse', {
+      const r = await api('/wallets/disperse', {
         kind: WK, chain: $('dsChain') ? $('dsChain').value : undefined,
         sourceId: $('dsFrom').value, targets,
-        useContract: $('dsMulti') ? $('dsMulti').checked : false,
         amountMode, strategy: 'amount', amount, token: $('dsTok') ? $('dsTok').value.trim() || undefined : undefined,
         randomMin, randomMax,
       });
-      if (r && r.mode === 'needs-confirm-fallback') {
-        const n = (r.plan || []).length;
-        if (!confirm(`The disperse contract transaction failed.\n\nThis will create ${n} individual transfer transactions from the same source wallet.\n\nSend individually?`)) throw new Error('cancelled fallback');
-        r = await api('/wallets/disperse', {
-          kind: WK, chain: $('dsChain') ? $('dsChain').value : undefined,
-          sourceId: $('dsFrom').value, targets,
-          useContract: $('dsMulti') ? $('dsMulti').checked : false,
-          amountMode, strategy: 'amount', token: $('dsTok') ? $('dsTok').value.trim() || undefined : undefined,
-          randomMin, randomMax, confirmFallback: true,
-        });
-      }
       closeModal();
-      const done = Array.isArray(r.sent) ? r.sent.filter((x) => x.hash).length : (r.hash ? 1 : 0);
-      ok('Dispersed', `${done}/${Array.isArray(r.sent) ? r.sent.length : r.count} sent${r.verified ? ' · verified' : ''}` + (r.hash ? ` · ${r.hash.slice(0, 10)}…` : ''));
+      const sentArr = Array.isArray(r.sent) ? r.sent : [];
+      const done = sentArr.filter((x) => x.hash).length;
+      ok('Dispersed', `${done}/${sentArr.length} sent`);
     } catch (e) { err('Disperse failed', e.message); b.disabled = false; b.textContent = 'Disperse'; }
   };
 }

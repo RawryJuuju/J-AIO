@@ -359,12 +359,11 @@ async function unwrapWeth(chainKey, walletId, amount) {
   return { hash: res.hash, amount: ethers.formatEther(val) };
 }
 
-/* ---------------- disperse / consolidate (Zyper-parity) ---------------- */
+/* ---------------- disperse / consolidate ----------------
+   Disperse always sends individual transfers from the source wallet.
+   No third-party disperse.app-style contract is ever touched: every tx is
+   signed locally and goes straight recipient-ward. */
 
-const DISPERSE_ABI = new ethers.Interface([
-  'function disperseEther(address[] recipients, uint256[] values) payable',
-  'function disperseToken(address token, address[] recipients, uint256[] values)',
-]);
 const ERC20_ABI = new ethers.Interface([
   'function transfer(address to, uint256 amount) returns (bool)',
   'function approve(address spender, uint256 amount) returns (bool)',
@@ -442,7 +441,7 @@ async function disperse(chainKey, sourceWalletId, targets, opts = {}) {
     if (tokenAddr) {
       total = bal;
     } else {
-      const probe = await p.estimateGas({ from: w.address, to: c.disperse || w.address, data: '0x', value: 0n }).catch(() => 21000n);
+      const probe = await p.estimateGas({ from: w.address, to: w.address, data: '0x', value: 0n }).catch(() => 21000n);
       const reserve = probe * gasOverride.maxFeePerGas * 13n / 10n;
       total = bal > reserve ? bal - reserve : 0n;
     }
@@ -462,66 +461,9 @@ async function disperse(chainKey, sourceWalletId, targets, opts = {}) {
 
   const total = plan.reduce((a, b) => a + b.wei, 0n);
   if (tokenAddr && total > bal) throw new Error(`insufficient token balance: need ${fmt(total)} ${meta.symbol}, have ${fmt(bal)}`);
-  const useContract = opts.useContract !== false && !opts.forceSingle && !!c.disperse;
 
-  if (useContract) {
-    try {
-      let data;
-      if (tokenAddr) data = DISPERSE_ABI.encodeFunctionData('disperseToken', [tokenAddr, plan.map((x) => x.address), plan.map((x) => x.wei)]);
-      else data = DISPERSE_ABI.encodeFunctionData('disperseEther', [plan.map((x) => x.address), plan.map((x) => x.wei)]);
-      let gasLimit;
-      try { gasLimit = (await p.estimateGas({ from: w.address, to: c.disperse, data, value: tokenAddr ? 0n : total })) * 12n / 10n; }
-      catch (e) {
-        if (opts.confirmFallback !== true) {
-          return { mode: 'needs-confirm-fallback', reason: String(e.shortMessage || e.message).slice(0, 140), plan: plan.map((x) => ({ address: x.address, amount: fmt(x.wei) })) };
-        }
-        gasLimit = null;
-      }
-      if (gasLimit) {
-        if (!tokenAddr && bal < total + gasLimit * gasOverride.maxFeePerGas) throw new Error('insufficient balance for disperse + gas');
-        let nonce = await p.getTransactionCount(w.address, 'pending');
-        /* ERC20: ensure allowance for the disperse contract first (Zyper same) */
-        if (tokenAddr) {
-          const allow = await p.call({ to: tokenAddr, data: ERC20_ABI.encodeFunctionData('allowance', [w.address, c.disperse]) }).then((r) => ERC20_ABI.decodeFunctionResult('allowance', r)[0]);
-          if (allow < total) {
-            const appData = ERC20_ABI.encodeFunctionData('approve', [c.disperse, ethers.MaxUint256]);
-            const appGas = (await p.estimateGas({ from: w.address, to: tokenAddr, data: appData })) * 12n / 10n;
-            const appRaw = await signer.signTransaction({ chainId: c.id, to: tokenAddr, data: appData, nonce: nonce++, gasLimit: appGas, ...gasOverride, type: 2 });
-            const appRes = await rpc.broadcast(chainKey, appRaw, urls);
-            store.appendLog('funds-sessions.log', `DISPERSE_APPROVE source=${w.address} chain=${c.key} token=${tokenAddr} contract=${c.disperse} hash=${appRes.hash}`);
-            /* wait for approve receipt before disperseToken */
-            await p.waitForTransaction(appRes.hash, 1, 60000).catch(() => null);
-          }
-        }
-        store.appendLog('funds-sessions.log', `DISPERSE_PREPARE source=${w.address} chain=${c.key} contract=${c.disperse} token=${tokenAddr || 'native'} amountMode=${amountMode} strategy=${strategy} targets=${JSON.stringify(plan.map((x) => ({ address: x.address, amount: fmt(x.wei) })))} total=${fmt(total)} gasLimit=${gasLimit} maxFee=${ethers.formatUnits(gasOverride.maxFeePerGas, 'gwei')}`);
-        const raw = await signer.signTransaction({ chainId: c.id, to: c.disperse, data, value: tokenAddr ? 0n : total, nonce, gasLimit, ...gasOverride, type: 2 });
-        const res = await rpc.broadcast(chainKey, raw, urls);
-        store.appendLog('funds-sessions.log', `DISPERSE_BROADCAST source=${w.address} chain=${c.key} token=${tokenAddr || 'native'} targets=${plan.length} total=${fmt(total)} hash=${res.hash} usedDisperse=1`);
-        require('./notify').notify('Disperse', [['chain', c.name], ['from', w.name], ['to', plan.length + ' wallet(s)'], ['total', fmt(total) + (meta ? ' ' + meta.symbol : ' ETH')], ['tx', res.hash.slice(0, 18) + '…']]);
-        /* Zyper parity: decode the broadcast tx and verify recipients/values */
-        let verified = null;
-        try {
-          const tx = await p.getTransaction(res.hash);
-          if (tx && tx.data && tx.data.length > 10) {
-            const decoded = DISPERSE_ABI.parseTransaction({ data: tx.data });
-            if (decoded && Array.isArray(decoded.args.recipients)) {
-              const rec = decoded.args.recipients.map((a) => a.toLowerCase());
-              const vals = decoded.args.values.map((v) => v.toString());
-              const match = plan.length === rec.length && plan.every((x, i) => x.address.toLowerCase() === rec[i] && x.wei.toString() === vals[i]);
-              verified = match ? 'match' : 'mismatch';
-              store.appendLog('funds-sessions.log', `DISPERSE_VERIFY hash=${res.hash} ${match ? 'match' : 'MISMATCH'} recipients=${rec.length} total=${vals.reduce((a, b) => (BigInt(a) + BigInt(b)).toString(), '0')}`);
-            }
-          }
-        } catch (e) { store.appendLog('funds-sessions.log', `DISPERSE_VERIFY hash=${res.hash} error=${String(e.message).slice(0, 80)}`); }
-        return { mode: 'contract', hash: res.hash, count: plan.length, total: fmt(total), token: tokenAddr || null, verified };
-      }
-    } catch (e) {
-      if (opts.confirmFallback === true) { /* fall through to individual sends */ }
-      else throw e;
-    }
-  }
-
-  /* fallback / direct: individual sends (native value or ERC20 transfer) */
+  /* Individual sends (native value or ERC20 transfer) — direct from source,
+     no intermediary contract. */
   let nonce = await p.getTransactionCount(w.address, 'pending');
   const sent = [];
   for (const t of plan) {
