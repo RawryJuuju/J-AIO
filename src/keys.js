@@ -71,43 +71,22 @@ function status(field) {
 const PROBES = {
   openseaKey: (k) => ({
     url: 'https://api.opensea.io/api/v2/collections?limit=1',
-    opt: { headers: { 'X-API-KEY': k, accept: 'application/json' } },
+    headers: { 'X-API-KEY': k, Accept: 'application/json' },
   }),
   etherscanKey: (k) => ({
     url: `https://api.etherscan.io/api?module=stats&action=ethprice&apikey=${encodeURIComponent(k)}`,
-    opt: {},
-  }),
-  alchemyKey: (k) => ({
-    url: `https://eth-mainnet.g.alchemy.com/v2/${encodeURIComponent(k)}`,
-    opt: {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-    },
   }),
   heliusKey: (k) => ({
     url: `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(k)}`,
-    opt: {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSlot', params: [] }),
-    },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
   }),
-  twoCaptchaKey: (k) => ({
-    url: `https://api.2captcha.com/getBalance?key=${encodeURIComponent(k)}`,
-    opt: {},
-  }),
-  capMonsterKey: (k) => ({
-    url: 'https://api.capmonster.cloud/getBalance',
-    opt: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clientKey: k }) },
-  }),
-  capsolverKey: (k) => ({
-    url: 'https://api.capsolver.com/getBalance',
-    opt: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clientKey: k }) },
-  }),
-  antiCaptchaKey: (k) => ({
-    url: 'https://api.anti-captcha.com/getBalance',
-    opt: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clientKey: k }) },
+  alchemyKey: (k) => ({
+    url: `https://eth-mainnet.g.alchemy.com/v2/${encodeURIComponent(k)}`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber' }),
   }),
 };
 
@@ -120,7 +99,9 @@ function mask(k) {
 async function probeOne(field, key) {
   const mk = PROBES[field];
   if (!mk) return { key: mask(key), state: 'unknown', ms: null, note: 'no probe for this provider' };
-  const { url, opt } = mk(key);
+  const spec = mk(key);
+  const { url, method, headers, body } = spec;
+  const opt = { method: method || 'GET', headers, body };
   const t0 = Date.now();
   try {
     const r = await fetch(url, { ...opt, signal: AbortSignal.timeout(12000) });

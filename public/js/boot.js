@@ -11,7 +11,7 @@ async function stopRun(id, isSol) {
 
 /* ---------- nav + routing ---------- */
 const NAV_ORDER = ['Overview', 'Minting', 'NFT', 'Wallets', 'Identity', 'Infra'];
-const PAGE_ORDER = ['home', 'quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'submit', 'btc', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
+const PAGE_ORDER = ['home', 'quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'btc', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
 
 function renderNav() {
   const nav = $('nav');
@@ -193,7 +193,7 @@ $('lockBtn').onclick = async () => {
 };
 
 $('panicBtn').onclick = () => confirmBox('Stop all runs?',
-  'Every active mint, X, and submit run will be halted. Transactions already broadcast cannot be recalled.',
+  'Every active mint and X run will be halted. Transactions already broadcast cannot be recalled.',
   async () => {
     try { const r = await api('/mint/stop-all', {}); warn('Stopped', `${r.stopped} run(s)`); }
     catch (e) { err('Failed', e.message); }

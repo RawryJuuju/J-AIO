@@ -189,9 +189,9 @@ function writePlain(name, obj) {
 /* ---------- settings: secrets sealed, rest plain ---------- */
 
 const SECRET_FIELDS = [
-  'etherscanKey', 'openseaKey', 'twoCaptchaKey', 'heliusKey', 'alchemyKey', 'flashbotsAuthKey',
+  'etherscanKey', 'openseaKey', 'heliusKey', 'alchemyKey', 'flashbotsAuthKey',
   // plural = multi-key pools (newline/comma separated), same secrecy as singular
-  'etherscanKeys', 'openseaKeys', 'twoCaptchaKeys', 'heliusKeys', 'alchemyKeys',
+  'etherscanKeys', 'openseaKeys', 'heliusKeys', 'alchemyKeys',
 ];
 const SECRET_SETTING_KEYS = new Set(SECRET_FIELDS);
 

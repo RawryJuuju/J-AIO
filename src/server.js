@@ -22,7 +22,6 @@ const sniper = require('./sniper');
 const taskmgr = require('./taskmgr');
 const wl = require('./wl');
 const xmodule = require('./xmodule');
-const submit = require('./submit');
 const eligibility = require('./eligibility');
 const activity = require('./activity');
 const fxrate = require('./fxrate');
@@ -48,8 +47,8 @@ function jsonSafe(v) {
 const SECRET_FIELD_NAMES = [
   'pk', 'privateKey', 'secretKey', 'mnemonic', 'seed', 'wif',
   'gmailAppPass', 'xToken', 'xCt0', 'discordToken', 'pass', 'password',
-  'etherscanKey', 'openseaKey', 'twoCaptchaKey', 'heliusKey', 'alchemyKey', 'flashbotsAuthKey',
-  'etherscanKeys', 'openseaKeys', 'twoCaptchaKeys', 'heliusKeys', 'alchemyKeys',
+  'etherscanKey', 'openseaKey', 'heliusKey', 'alchemyKey', 'flashbotsAuthKey',
+  'etherscanKeys', 'openseaKeys', 'heliusKeys', 'alchemyKeys',
 ];
 const SECRET_KEYS = new Set(SECRET_FIELD_NAMES);
 
@@ -84,7 +83,6 @@ function sseSend(payload) {
 
 mint.bus.on('event', (e) => sseSend({ kind: 'mint', ...e }));
 xmodule.bus.on('event', (e) => sseSend({ kind: 'x', ...e }));
-submit.bus.on('event', (e) => sseSend({ kind: 'submit', ...e }));
 wl.bus.on('event', (e) => sseSend({ kind: 'wl', ...e }));
 
 /* ---------------- routes ---------------- */
@@ -423,7 +421,6 @@ const routes = {
   'GET /api/keystatus': async () => ({
     opensea: keys.status('openseaKey'), alchemy: keys.status('alchemyKey'),
     etherscan: keys.status('etherscanKey'), helius: keys.status('heliusKey'),
-    twocaptcha: keys.status('twoCaptchaKey'),
   }),
 
   /* Live latency badge per key. Hits each provider once — slow on purpose,
@@ -470,22 +467,6 @@ const routes = {
   'POST /api/x/stop': async (b) => ({ ok: xmodule.stop(b.runId) }),
   'GET /api/x/runs': async () => xmodule.list(),
   'GET /api/x/status': async (b, q) => xmodule.status(q.runId),
-
-  /* --- submit module --- */
-  'GET /api/submit/templates': async () => submit.listTemplates(),
-  'POST /api/submit/templates': async (b) => submit.saveTemplate(b),
-  'POST /api/submit/templates/save': async (b) => submit.saveTemplate(b),
-  'POST /api/submit/templates/delete': async (b) => submit.deleteTemplate(b.id),
-  'DELETE /api/submit/templates': async (b) => submit.deleteTemplate(b.id),
-  'POST /api/submit/start': async (b) => submit.start(b),
-  'POST /api/submit/stop': async (b) => ({ ok: submit.stop(b.runId) }),
-  'GET /api/submit/runs': async () => submit.list(),
-  'GET /api/submit/status': async (b, q) => submit.status(q.runId),
-  'POST /api/submit/test': async (b) => {
-    const acc = accounts.getAccount(b.accountId);
-    if (!acc) throw new Error('account not found');
-    return submit.submitOne(b.cfg, acc, null);
-  },
 
   /* --- logs --- */
   'GET /api/logs': async (b, q) => ({ lines: store.tailLog(q.name || 'mint-runs.log', Number(q.n || 200)) }),
@@ -667,7 +648,7 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-/* Crash guards. A background mint/submit run that rejects unhandled would
+/* Crash guards. A background mint run that rejects unhandled would
  * otherwise kill the process mid-flight (Node 15+ exits on unhandled
  * rejection), losing every in-progress run. Log and keep serving instead. */
 process.on('unhandledRejection', (e) => {

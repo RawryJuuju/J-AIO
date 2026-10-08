@@ -120,7 +120,7 @@ The EVM mint pipeline (`src/mint.js` + `src/launchpads.js`):
 5. **Gas presets** — `ultra / low / normal / fast` (base-fee multiples + priority tiers)
 6. **Live progress** — per-wallet status streamed to the UI (`/api/mint/events`)
 
-Supporting modules: `src/abi.js` (ABI resolution: Etherscan/Blockscout/Sourcify + selector fallback), `src/chains.js` (chain registry), `src/rpc.js` (RPC groups + failover), `src/eligibility.js` (allowlist/drop eligibility), `src/submit.js` (generic signed-request submission).
+Supporting modules: `src/abi.js` (ABI resolution: Etherscan/Blockscout/Sourcify + selector fallback), `src/chains.js` (chain registry), `src/rpc.js` (RPC groups + failover), `src/eligibility.js` (allowlist/drop eligibility).
 
 ---
 
@@ -140,8 +140,7 @@ src/                 backend modules
   pnl.js             multi-wallet PnL scanner (Blockscout public API)
   pnl_card.py        PnL card PNG renderer
   accounts.js        X/Twitter account pool
-  xmodule.js         X engagement flows
-  submit.js          generic form-submit engine
+  xmodule.js         X/Twitter automation (like, retweet, follow)
   taskmgr.js         task queue/scheduler
   chains.js          chain registry (Robinhood 4663, ETH, Base, ...)
   rpc.js / proxies.js  infra registries + probing

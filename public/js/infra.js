@@ -9,7 +9,7 @@ page('proxies', {
   render(el) {
     el.innerHTML = `
       <h2 class="pt">Proxies</h2>
-      <p class="ps">Groups of HTTP/SOCKS proxies. Assigned round-robin to accounts for X, Discord, and form submits.</p>
+      <p class="ps">Groups of HTTP/SOCKS proxies. Assigned round-robin to accounts for X and Discord.</p>
       <div class="card">
         <div class="row">
           <div style="flex:1;min-width:180px"><label class="f">Group</label><select id="pxG"></select></div>
@@ -390,10 +390,6 @@ page('settings', {
       { field: 'etherscanKey', label: 'Etherscan V2', hint: 'ABI fetch, all chains', why: 'Optional. Without a key ABI fetch falls back to a shared quota.' },
       { field: 'alchemyKey', label: 'Alchemy', hint: 'NFT inventory, EVM RPC', why: 'Used when OpenSea inventory is incomplete.' },
       { field: 'heliusKey', label: 'Helius', hint: 'Solana RPC', why: 'Rotated per Solana wallet so a 429 on one does not stall the batch.' },
-      { field: 'twoCaptchaKey', label: 'Captcha solver', hint: '2captcha / CapMonster / CapSolver / AntiCaptcha', why: 'Needed only for whitelist form submits.' },
-      { field: 'capMonsterKey', label: 'CapMonster', hint: 'captcha pool', why: 'Alternative captcha provider (Zyper parity).' },
-      { field: 'capsolverKey', label: 'CapSolver', hint: 'captcha pool', why: 'Alternative captcha provider (Zyper parity).' },
-      { field: 'antiCaptchaKey', label: 'AntiCaptcha', hint: 'captcha pool', why: 'Alternative captcha provider (Zyper parity).' },
     ];
 
     const BADGE = { good: 'ok', slow: 'warn', limited: 'warn', bad: 'fail', dead: 'fail', unknown: 'mut' };
@@ -528,7 +524,7 @@ page('settings', {
       renderPools(s, null);
       api('/keystatus').then((st) => {
         POOLS.forEach((p) => {
-          const short = p.field.replace(/Key$/, '').replace('twoCaptcha', 'twocaptcha');
+          const short = p.field.replace(/Key$/, '');
           const info = st[short] || st[p.field];
           const c = $('kc-' + p.field);
           if (c && info) c.textContent = `${info.total} key${info.total === 1 ? '' : 's'}${info.cooling ? ` · ${info.cooling} cooling` : ''}`;
