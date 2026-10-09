@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "J-AIO Capture (Zyper Capture parity)",
+  "name": "J-AIO Capture (J-AIO Capture parity)",
   "version": "1.0.0",
   "description": "Captures eth_sendTransaction calls from mint sites and pushes them to J-AIO (:8899).",
   "permissions": [],

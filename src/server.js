@@ -436,7 +436,7 @@ const routes = {
       return { ok: true, ms: Date.now() - t };
     } catch (e) { return { ok: false, error: String(e.message || e).slice(0, 80) }; }
   },
-  /* Zyper Capture parity: browser extension forwards dapp tx to this endpoint.
+  /* J-AIO Capture parity: browser extension forwards dapp tx to this endpoint.
      No session needed (extension can't hold one) — loopback + X-JAIO-App only. */
   'POST /api/capture': async (b) => {
     const d = { ...(b || {}), ts: new Date().toISOString(), ip: 'loopback' };

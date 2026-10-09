@@ -352,7 +352,7 @@ page('settings', {
       <div class="card"><h3>Other keys</h3>
         <div class="grid g2">
           <div><label class="f">Flashbots signer key <span class="opt">— reputation, optional</span></label><input id="stFb" placeholder="unset"></div>
-          <div><label class="f">Discord webhook URL <span class="opt">— Zyper parity</span></label><input id="stWebhook" class="mono" placeholder="https://discord.com/api/webhooks/…"></div>
+          <div><label class="f">Discord webhook URL <span class="opt">— J-AIO parity</span></label><input id="stWebhook" class="mono" placeholder="https://discord.com/api/webhooks/…"></div>
         </div>
         <div class="row" style="margin-top:var(--s3)"><button class="btn xs" id="stWebhookTest">Test webhook</button><span class="sm mut" id="stWebhookOut" style="align-self:center"></span></div>
       </div>

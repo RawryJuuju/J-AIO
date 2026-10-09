@@ -64,7 +64,7 @@ function status(field) {
 }
 
 /* ---------- latency probe ----------
- * Zyper shows a green/amber latency badge next to each API key. Useful signal:
+ * J-AIO shows a green/amber latency badge next to each API key. Useful signal:
  * a key that answers in 180ms is healthy, one that 401s is a typo, and one that
  * 429s is already burnt. Each provider needs its own cheap authenticated call.
  */

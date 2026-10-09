@@ -100,7 +100,7 @@ page('nftview', {
       qa('#cvHead [data-copy]').forEach((b) => { b.onclick = () => copy(b.dataset.copy); });
     }
 
-    /* Rarity tiers — share-of-supply buckets, Zyper-style. The header chips
+    /* Rarity tiers — share-of-supply buckets, J-AIO-style. The header chips
        carry the counts; the badge class maps to the tier colour. */
     const TIERS = [
       { name: 'Legendary', label: 'Top 1%', color: '#F6A219', max: 0.01 },
@@ -430,7 +430,7 @@ page('nftview', {
       } finally { if (!silent) { b.disabled = false; b.textContent = 'Load'; } }
     }
 
-    /* Reveal watch — Zyper's Viewer reveal monitor, built on the 60s
+    /* Reveal watch — J-AIO's Viewer reveal monitor, built on the 60s
        auto-refresh already running here. Snapshots each token's image when
        armed; any image change on a later refresh counts as that token being
        revealed. Read-only, no extra API calls, no rate-limit cost. */
@@ -891,7 +891,7 @@ function acceptModal(n, data) { /* superseded by bulk accept on the selection ba
 
 /* ---------- PnL card ---------- */
 
-/* A shareable card, the way Zyper does it: Minted / Sold / Bought / Holding on
+/* A shareable card, the way J-AIO does it: Minted / Sold / Bought / Holding on
  * one row, net underneath, crypto or USD. Rendered to canvas for PNG download
  * so it can be dropped straight into a tweet. */
 function pnlCardModal(chain, input, walletIds) {

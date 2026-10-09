@@ -1,5 +1,5 @@
 'use strict';
-/* Discord webhook notifications — Zyper parity (webhookUrl setting). */
+/* Discord webhook notifications — J-AIO parity (webhookUrl setting). */
 
 const store = require('./store');
 

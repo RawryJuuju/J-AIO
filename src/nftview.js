@@ -1,7 +1,7 @@
 'use strict';
 /* NFT collection viewer — the "NFT Manager" surface.
  *
- * Zyper's NFT tab answers one question fast: which of MY wallets hold tokens
+ * J-AIO's NFT tab answers one question fast: which of MY wallets hold tokens
  * from THIS contract, and what is each token worth right now. That needs four
  * different OpenSea endpoints stitched together, so it lives here rather than
  * in nftops.js (which is about writing: transfer, list, accept).
@@ -478,7 +478,7 @@ async function collection(chainKey, input, walletList, opts = {}) {
 
 /* ---------- PnL card data ---------- */
 
-/* The card in Zyper shows Minted / Sold / Bought / Holding with an ETH figure
+/* The card in J-AIO shows Minted / Sold / Bought / Holding with an ETH figure
  * under each, then the net. The numbers come from the same OpenSea event crawl
  * PnL already does, filtered to one collection so the card is per-project. */
 async function pnlCard(chainKey, input, walletList, opts = {}) {

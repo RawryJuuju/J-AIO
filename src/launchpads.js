@@ -436,7 +436,7 @@ async function scatter(url) {
       id: l.id || String(i), name: l.name || `List ${i}`,
       price: l.token_price != null ? String(l.token_price) : '0',
       maxPerWallet: l.wallet_limit ?? null, isPublic: /public/i.test(l.name || ''),
-      // Zyper binary struct scatter.inviteListResponse carries json:"merkleRoot"; accept both shapes
+      // J-AIO binary struct scatter.inviteListResponse carries json:"merkleRoot"; accept both shapes
       root: l.root || l.merkleRoot || null,
     };
   });

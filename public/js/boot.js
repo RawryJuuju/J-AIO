@@ -108,7 +108,7 @@ async function tickGas() {
   } catch { /* locked or offline */ }
 }
 
-/* Gas chain selector in the header — Zyper-style per-chain ticker. Choice is
+/* Gas chain selector in the header — J-AIO-style per-chain ticker. Choice is
    remembered across sessions so the operator's usual chain shows first. */
 function initGasChain() {
   const hc = $('hChain');

@@ -574,7 +574,7 @@ async function start(cfg) {
   const runId = nid('run');
   const walletList = (cfg.walletIds || []).map((id) => wallets.getWallet('evm', id)).filter(Boolean);
   if (!walletList.length) throw new Error('no wallets selected');
-  // Zyper parity: mode 'simulate' = keep eth_call-ing until the call passes,
+  // J-AIO parity: mode 'simulate' = keep eth_call-ing until the call passes,
   // then broadcast the real tx (see fire()). Re-enabled 2026-08 (removed earlier).
   const c = chainsMod.chain(cfg.chain);
   const state = {
@@ -778,7 +778,7 @@ async function start(cfg) {
       // broadcast
       const fire = async (s) => {
         if (state.stopped) return;
-        // Zyper 'simulate' mode: poll eth_call until the wallet's mint call
+        // J-AIO 'simulate' mode: poll eth_call until the wallet's mint call
         // stops reverting, then land the real tx once. Stop = manual, max
         // attempts (cfg.attemptCount), or STOP_ALL conditions below.
         if (state.mode === 'simulate' && s.call) {

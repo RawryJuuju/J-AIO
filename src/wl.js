@@ -1,7 +1,7 @@
 'use strict';
 /* Whitelist checker + project book.
  *
- * Two things Zyper's WHITELISTS tab does that the single-stage eligibility
+ * Two things J-AIO's WHITELISTS tab does that the single-stage eligibility
  * check cannot:
  *
  *   1. CHECKER — one drop link, every stage at once, one column per stage and
@@ -160,7 +160,7 @@ async function checkStagesForWallet(ctx, w) {
 }
 
 /* Custom Whitelist Checker module — allows manually adding or loading a list of
-   eligible addresses for custom phases (Zyper-style TierSet/BoolPhase/ListPhase). */
+   eligible addresses for custom phases (J-AIO-style TierSet/BoolPhase/ListPhase). */
 const customCheckers = new Map();
 
 function addCustomChecker(name, phases) {

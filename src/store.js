@@ -1,6 +1,6 @@
 'use strict';
 /* Encrypted local store. AES-256-GCM, key derived from master password via scrypt.
- * Linux equivalent of Zyper's DPAPI-sealed .dat files. */
+ * Linux equivalent of J-AIO's DPAPI-sealed .dat files. */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

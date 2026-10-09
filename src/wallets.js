@@ -382,7 +382,7 @@ async function tokenMeta(p, addr) {
   return { symbol, decimals };
 }
 
-/* Zyper amountMode: fixed | random | max ; strategy: amount | target */
+/* J-AIO amountMode: fixed | random | max ; strategy: amount | target */
 async function disperse(chainKey, sourceWalletId, targets, opts = {}) {
   const c = chains.chain(chainKey);
   const w = getWallet('evm', sourceWalletId);

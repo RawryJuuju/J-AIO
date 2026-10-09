@@ -321,7 +321,7 @@ async function check(opts) {
   }
 
   if (opts.allStages) {
-    /* Zyper-style matrix: every wallet × every phase, one row per wallet. */
+    /* J-AIO-style matrix: every wallet × every phase, one row per wallet. */
     const out = { chain: c.key, platform: info.platform, address: info.address, slug: info.slug || null,
       name: info.name || null, gasHeadroomEth: Number(ethers.formatEther(gasWei)), matrix: true, stages: [] };
     const byWallet = new Map();
