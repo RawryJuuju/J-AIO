@@ -1,5 +1,4 @@
 'use strict';
-/* RPC pool: groups, health probe, latency, multi-broadcast + round-robin. */
 const { ethers } = require('ethers');
 const store = require('./store');
 const chains = require('./chains');
@@ -73,8 +72,6 @@ async function reprobeGroup(groupId) {
   save(d); return g.rpcs;
 }
 
-/* URLs for a chain: private broadcast RPCs first (Flashbots-style builders),
-   then user's healthy RPCs (fastest), then public fallbacks. */
 function privateUrls(chainKey) {
   try {
     const s = store.readSettings();
@@ -100,7 +97,6 @@ function urlsFor(chainKey, opts = {}) {
   return [...privateUrls(c.key), ...user, ...pub].filter((u) => !seen.has(u) && seen.add(u));
 }
 
-/* Public endpoints only — never private builders or user RPC groups. */
 function publicUrls(chainKey) {
   const c = chains.chain(chainKey);
   let settings = {};
@@ -109,10 +105,6 @@ function publicUrls(chainKey) {
   return override ? [override, ...c.rpcs] : [...c.rpcs];
 }
 
-/* URLs for READ-only calls (Collection Manager, balance refresh, delegation
-   scans). When "public RPC only" is enabled (default ON), reads never touch
-   the user's private/Alchemy endpoints — saves paid quota. Transaction
-   broadcast paths keep using urlsFor(). */
 function readUrls(chainKey) {
   let s = {};
   try { s = store.readSettings(); } catch { /* locked */ }
@@ -134,7 +126,6 @@ function providersFor(chainKey, urls) {
   return (urls && urls.length ? urls : urlsFor(chainKey)).map((u) => provider(u, c.id));
 }
 
-/* First provider that answers a read. */
 async function readAny(chainKey, fn, urls) {
   const ps = providersFor(chainKey, urls);
   let lastErr;
@@ -144,7 +135,6 @@ async function readAny(chainKey, fn, urls) {
   throw lastErr || new Error('all RPCs failed');
 }
 
-/* Race all providers, first success wins. */
 async function readRace(chainKey, fn, urls) {
   const ps = providersFor(chainKey, urls);
   if (!ps.length) throw new Error('no RPC');
@@ -157,11 +147,6 @@ async function readRace(chainKey, fn, urls) {
   });
 }
 
-/* Multi-RPC broadcast: send raw tx to every URL in parallel, first accept wins.
- * On total failure, surface the most informative error rather than whichever
- * RPC happened to fail first — a dead endpoint returning "missing response for
- * request" otherwise masks the real reason (nonce too low, insufficient funds,
- * already known, reverted). */
 const TRANSPORT_NOISE = /missing response|timeout|fetch failed|ETIMEDOUT|ECONNRESET|ENOTFOUND|socket hang up|502|503|504|429/i;
 
 function bestBroadcastError(errors) {
@@ -194,7 +179,6 @@ async function broadcast(chainKey, rawTx, urls) {
   });
 }
 
-/* Safe view for UI. */
 function listSafe() {
   const d = load();
   return d.groups.map((g) => ({
@@ -204,7 +188,6 @@ function listSafe() {
   }));
 }
 
-/* Seed one group per chain from the built-in public RPC lists. */
 async function seedDefaults() {
   const d = load();
   let created = 0, added = 0;

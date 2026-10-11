@@ -1,13 +1,5 @@
 'use strict';
-/* Whitelist Checker + Projects.
- *
- * Two pages that share one backend. The checker sweeps every wallet against
- * every stage of a drop at once and streams progress; the projects page is the
- * saved book of those results, so a check done weeks ago is still actionable
- * (fund exactly those wallets, spin up mint tasks from the eligible list).
- */
 
-/* ---------------- checker ---------------- */
 
 page('wlcheck', {
   label: 'WL Checker', group: 'NFT', icon: 'check',
@@ -45,8 +37,6 @@ page('wlcheck', {
       return S.wallets.evm.filter((w) => !g || w.groupId === g).map((w) => w.id);
     }
 
-    /* One column per phase. The cell is the wallet's ceiling by that phase —
-       a ✓N read, not a raw boolean, because the number is what you fund for. */
     function cell(c) {
       if (!c) return '<td class="wcx"><span class="mut">—</span></td>';
       if (c.verdict === 'eligible') {
@@ -177,7 +167,6 @@ page('wlcheck', {
   },
 });
 
-/* ---------------- projects ---------------- */
 
 page('projects', {
   label: 'Projects', group: 'NFT', icon: 'book',
@@ -320,8 +309,6 @@ page('projects', {
       return { project, phase };
     }
 
-    /* Fund: the numbers the phase already knows (price × cap) plus gas headroom
-       become the suggested per-wallet amount, so the common case is one click. */
     function fundModal({ project, phase }) {
       const need = Number(phase.price || 0);
       const perWallet = phase.wallets.map((w) => need * (w.cap || 1));
@@ -349,8 +336,6 @@ page('projects', {
       };
     }
 
-    /* Create tasks: hand the phase straight to the mint page rather than
-       duplicating the mint form here. */
     function taskModal({ project, phase }) {
       modal(`<h3>Create mint tasks</h3>
         <div class="sm mut">${esc(project.name)} · ${esc(phase.name)}</div>

@@ -1,5 +1,4 @@
 'use strict';
-/* NFT Sniper page — auto-buy listings under target price via Seaport 1.6. */
 
 page('sniper', {
   label: 'NFT Sniper', group: 'NFT', icon: 'tools',

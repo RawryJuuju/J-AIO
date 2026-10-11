@@ -1,5 +1,4 @@
 'use strict';
-/* NFT ops — inventory, transfer/sweep, list, floor war, offers, PnL */
 
 page('nftinv', {
   label: 'Inventory & Transfer', group: 'NFT', icon: 'inv',
@@ -145,9 +144,6 @@ function listModal(n, chain) {
     </div>
     <div class="infobox">Seaport 1.6 order signed locally, submitted to the OpenSea API. Needs an OpenSea key in Settings.</div>
     <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" id="nlGo">List</button></div>`);
-  /* Auto-detect the collection's listing currency — some RH collections only
-   * list in a specific ERC20 (hoodwarrios → USDG). Update the price suffix +
-   * show a note so the entered unit is never ambiguous. */
   let DETCUR = null;
   api('/nft/collection-currency', { chain, slug: n.collection }).then((r) => {
     if (!r || !r.symbol) return;
@@ -159,7 +155,6 @@ function listModal(n, chain) {
       if (note) { note.innerHTML = `This collection lists in <b>${esc(r.symbol)}</b> — the price you enter is in ${esc(r.symbol)}, not ETH.`; note.classList.remove('hide'); }
     }
   }).catch(() => {});
-  /* ETH <-> USD two-way sync; ETH field is the value that gets listed. */
   $('nlP').oninput = () => { const v = Number($('nlP').value); $('nlPUsd').value = v && S.ethUsd ? (v * S.ethUsd).toFixed(2) : ''; };
   $('nlPUsd').oninput = () => { const v = Number($('nlPUsd').value); $('nlP').value = v && S.ethUsd ? String(Number((v / S.ethUsd).toFixed(10))) : ''; };
   $('nlGo').onclick = async () => {

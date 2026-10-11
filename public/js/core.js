@@ -1,5 +1,4 @@
 'use strict';
-/* J-AIO core: api client, state, toasts, modal, helpers, page registry */
 
 const S = {
   locked: true, chains: [], settings: {},
@@ -12,11 +11,6 @@ const S = {
 const PAGES = {};   // key -> {label, group, icon, render(el)}
 function page(key, def) { PAGES[key] = def; }
 
-/* ---------- theme (night / light) ----------
-   data-theme on <html> drives the CSS variable blocks. localStorage is the
-   source of truth (applied pre-paint by the inline bootstrap in index.html,
-   works before unlock); the value is mirrored to server settings so it
-   survives a browser-profile wipe. */
 function currentTheme() {
   const t = document.documentElement.getAttribute('data-theme');
   return t === 'light' ? 'light' : 'night';
@@ -27,7 +21,6 @@ function applyTheme(t) {
   try { localStorage.setItem('jaio_theme', t); } catch (e) { /* private mode */ }
 }
 
-/* ---------- icon set (single stroked family, 24x24) ---------- */
 const ICON_PATHS = {
   dash: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   mint: '<path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9z"/><path d="M12 21.5v-9M21 7.5l-9 5-9-5"/>',
@@ -80,17 +73,6 @@ function icon(name, cls) {
   return `<svg class="i ${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
 
-/* ---------- unified empty state ---------- */
-/* Gate a control instead of using the native `disabled` attribute.
- *
- * Chrome does not fire mouse events on disabled form controls, so a `title`
- * tooltip on a <button disabled> never appears — the user is left guessing why
- * a row of greyed buttons does nothing. Disabled controls are also removed
- * from the tab order, so screen readers skip the explanation entirely.
- *
- * Instead we mark aria-disabled + data-gated, keep the element focusable and
- * hoverable (tooltip works, AT announces "dimmed"), and swallow activation in
- * the capture phase before any page handler runs. */
 function gate(el, ok, reason) {
   const b = typeof el === 'string' ? $(el) : el;
   if (!b) return;
@@ -105,7 +87,6 @@ function gate(el, ok, reason) {
   }
 }
 
-/* one capture-phase guard for every gated control on the page */
 ['click', 'keydown'].forEach((evt) => {
   document.addEventListener(evt, (e) => {
     const b = e.target.closest && e.target.closest('[data-gated]');
@@ -127,7 +108,6 @@ function emptyState(o) {
   </div>`;
 }
 
-/* ---------- api ---------- */
 async function api(path, body, method) {
   const opt = { method: method || (body ? 'POST' : 'GET'), headers: { 'x-jaio-app': '1' }, credentials: 'same-origin' };
   const session = sessionStorage.getItem('jaio-session');
@@ -143,7 +123,6 @@ async function api(path, body, method) {
 }
 const del = (p, b) => api(p, b, 'DELETE');
 
-/* ---------- toast ---------- */
 function toast(title, msg, kind) {
   const d = document.createElement('div');
   d.className = 'toast ' + (kind || '');
@@ -155,7 +134,6 @@ const ok = (t, m) => toast(t, m, 'ok');
 const err = (t, m) => toast(t, m, 'fail');
 const warn = (t, m) => toast(t, m, 'warn');
 
-/* ---------- helpers ---------- */
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -165,8 +143,6 @@ const qa = (sel, root) => [...(root || document).querySelectorAll(sel)];
 const short = (a, n) => (a ? a.slice(0, n || 6) + '…' + a.slice(-4) : '');
 const fx = (v, d) => (v == null || v === '' || isNaN(v) ? '—' : Number(v).toFixed(d == null ? 4 : d));
 const ts = (t) => new Date(t).toLocaleTimeString('en-GB', { hour12: false });
-/* Compact countdown for armed mints / unopened phases. d>0 → "2d 03:15:09",
- * h>0 → "03:15:09", else "15:09". <=0 → "now". */
 function fmtCountdown(msLeft) {
   if (msLeft == null || isNaN(msLeft)) return '—';
   if (msLeft <= 0) return 'now';
@@ -180,8 +156,6 @@ function fmtCountdown(msLeft) {
   return `${p(m)}:${p(s)}`;
 }
 function num(v, d) { return v == null || isNaN(v) ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d == null ? 4 : d }); }
-/* Rupiah, short-scaled. A gas number like Rp 18.402 is noise; Rp 18,4rb reads
- * at a glance and that is the whole point of showing IDR at all. */
 function idr(v) {
   if (v == null || isNaN(v)) return '—';
   const n = Number(v);
@@ -192,7 +166,6 @@ function idr(v) {
   if (a >= 1e3) return `${sign}Rp ${(a / 1e3).toFixed(a >= 1e4 ? 0 : 1)}rb`;
   return `${sign}Rp ${Math.round(a)}`;
 }
-/* ETH -> IDR using the cached rates on S. Null when rates never loaded. */
 function ethIdr(eth) {
   if (eth == null || isNaN(eth) || !S.ethUsd || !S.usdIdr) return null;
   return Number(eth) * S.ethUsd * S.usdIdr;
@@ -207,8 +180,6 @@ function chainOpts(sel) {
   return S.chains.filter((c) => !c.hidden || c.key === sel)
     .map((c) => `<option value="${c.key}"${c.key === sel ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
 }
-/* Native gas token ticker for a chain key — used as the in-field unit suffix so
-   a Polygon run never reads "ETH". Falls back to blank on unknown keys. */
 function nativeSym(chainKey) {
   const c = (S.chains || []).find((x) => x.key === chainKey);
   return c && c.symbol ? c.symbol : '';
@@ -223,8 +194,6 @@ function ago(t) {
   if (s < 3600) return Math.floor(s / 60) + 'm';
   return Math.floor(s / 3600) + 'h';
 }
-/* Forward duration in seconds as a compact "3d 8h" / "12m 04s" string. Two
-   units max — enough to sanity-check a mint start time at a glance. */
 function dur(s) {
   s = Math.max(0, Math.floor(s));
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
@@ -235,7 +204,6 @@ function dur(s) {
   return `${sec}s`;
 }
 
-/* ---------- modal ---------- */
 function modal(html, wide) {
   const box = $('modalBox');
   window.__modalFocus = document.activeElement;
@@ -253,7 +221,6 @@ function closeModal() {
 $('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
-/* ---------- confirm ---------- */
 function confirmBox(title, body, onYes, yesLabel) {
   modal(`<h3>${esc(title)}</h3><div class="sm" style="color:var(--txt2);line-height:1.6">${body}</div>
   <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button>
@@ -261,8 +228,6 @@ function confirmBox(title, body, onYes, yesLabel) {
   $('cfYes').onclick = () => { closeModal(); onYes(); };
 }
 
-/* Confirm that requires typing an exact phrase. Use for bulk destructive ops
-   where a single mis-click would be unrecoverable. */
 function confirmTyped(title, body, phrase, onYes, yesLabel) {
   modal(`<h3>${esc(title)}</h3><div class="sm" style="color:var(--txt2);line-height:1.6">${body}</div>
   <label class="f" style="margin-top:var(--s3)">Type <code>${esc(phrase)}</code> to confirm</label>
@@ -278,7 +243,6 @@ function confirmTyped(title, body, phrase, onYes, yesLabel) {
   inp.focus();
 }
 
-/* ---------- multi-select pills ---------- */
 function pillList(items, selectedSet, onChange) {
   const wrap = document.createElement('div');
   wrap.className = 'pills';
@@ -296,7 +260,6 @@ function pillList(items, selectedSet, onChange) {
   return wrap;
 }
 
-/* ---------- console widget ---------- */
 function conLine(el, e) {
   const d = document.createElement('div');
   d.className = 'l ' + (e.level || 'info');
@@ -323,7 +286,6 @@ document.addEventListener('error', (e) => {
   }
 }, true);
 
-/* ---------- SSE ---------- */
 const SSE_SUBS = new Set();
 function onEvent(fn) { SSE_SUBS.add(fn); return () => SSE_SUBS.delete(fn); }
 
@@ -337,7 +299,6 @@ function startSSE() {
   };
 }
 
-/* ---------- lock ---------- */
 function showLock(hint) {
   $('lock').style.display = 'flex';
   $('app').classList.remove('on');

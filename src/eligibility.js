@@ -1,18 +1,4 @@
 'use strict';
-/* Eligibility checker — "can THIS wallet mint THIS drop, right now?"
- *
- * One resolved launchpad + N wallets in, one verdict per wallet out. Runs the
- * cheapest checks first and stops at the first hard NO so a 100-wallet sweep
- * does not burn 100 API calls per wallet:
- *
- *   1. balance      — needs price*qty + gas headroom
- *   2. wallet limit — onchain minted-per-wallet vs stage cap
- *   3. allowlist    — platform-specific (OpenSea drop API / Scatter lists)
- *   4. calldata     — final proof: ask the platform to build the mint tx
- *
- * Verdict is one of: eligible | not_eligible | underfunded | limit_reached |
- * closed | unknown. The UI colours on that, the reason string explains it.
- */
 const { ethers } = require('ethers');
 const chainsMod = require('./chains');
 const rpc = require('./rpc');
@@ -21,10 +7,6 @@ const launchpads = require('./launchpads');
 const nftops = require('./nftops');
 const keys = require('./keys');
 
-/* ---------------- OpenSea SIWE + GraphQL eligibility ----------------
- * Same mechanism the OpenSea website uses: sign a SIWE login with the wallet
- * key, then ask gql DropEligibilityQuery for the drop's per-stage isEligible.
- * This is ground truth — no heuristics. (Ported from plseligbot.) */
 const SIWE_NONCE_URL = 'https://opensea.io/__api/auth/siwe/nonce';
 const SIWE_VERIFY_URL = 'https://opensea.io/__api/auth/siwe/verify';
 const GQL_URL = 'https://gql.opensea.io/graphql';
@@ -60,8 +42,6 @@ async function osSiweLogin(pk) {
   return { cookie: token.split(';')[0], address: checksummed };
 }
 
-/* Cached SIWE session — one login per pk per 40 min (cookie max-age ~3.5d,
- * but reusing too long risks mid-run expiry on hot FCFS runs). */
 const _sessCache = new Map();
 async function osSessionCached(pk) {
   const hit = _sessCache.get(pk);
@@ -105,7 +85,6 @@ async function osDropEligibility(sess, slug) {
   }));
 }
 
-/* drops API stage order → labels, so GraphQL stageIndex maps to a name */
 async function osDropLabels(slug) {
   try {
     const d = await nftops.osFetch(`/api/v2/drops/${slug}`);
@@ -116,8 +95,6 @@ async function osDropLabels(slug) {
 
 const normLabel = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-/* Match one resolved stage against the GraphQL stage list. Label first (via
- * drops-API index→label), then stage_type, then numeric stage id as index. */
 function matchEligStage(elig, labels, stage) {
   const want = normLabel(stage.name);
   for (const g of elig) {
@@ -182,7 +159,6 @@ async function mintedBy(chainKey, address, wallet, rpcUrls) {
   return null;
 }
 
-/* Stage open/closed by wall clock. Stages without times are treated as open. */
 function stageWindow(stage) {
   const now = Math.floor(Date.now() / 1000);
   if (stage.startTime && now < stage.startTime) return { open: false, reason: `starts in ${Math.round((stage.startTime - now) / 60)}m` };
@@ -208,7 +184,6 @@ async function checkOne(ctx, w) {
   const win = stageWindow(stage);
   if (!win.open) return { ...row, verdict: 'closed', reason: win.reason };
 
-  // 1. funds
   try {
     const bal = await rpc.readRace(chainKey, (p) => p.getBalance(w.address), ctx.rpcUrls);
     row.balance = Number(ethers.formatEther(bal));
@@ -219,7 +194,6 @@ async function checkOne(ctx, w) {
     }
   } catch { /* RPC hiccup — keep going, funds re-checked at mint */ }
 
-  // 2. per-wallet cap
   const cap = Number(stage.maxPerWallet || 0);
   if (cap > 0) {
     const done = await mintedBy(chainKey, info.address, w.address, ctx.rpcUrls);
@@ -230,12 +204,10 @@ async function checkOne(ctx, w) {
     }
   }
 
-  // public stage: no allowlist gate — funded + under cap is enough, skip probe
   if (stage.isPublic || /public/i.test(stage.stageType || '') || /public/i.test(stage.name || '')) {
     return { ...row, verdict: 'eligible', reason: 'public stage — auto pass' };
   }
 
-  // 3 + 4. platform allowlist / calldata proof
   try {
     if (info.platform === 'opensea' && info.slug) {
       const elig = ctx.eligMap && ctx.eligMap[w.id];
@@ -262,7 +234,6 @@ async function checkOne(ctx, w) {
     return { ...row, verdict: 'unknown', reason: String(e.message).slice(0, 100) };
   }
 
-  // plain contract: no allowlist source, funds + cap passed
   const merkle = stage.root || stage.merkleRoot;
   if (merkle && !/^0x0{64}$/.test(String(merkle))) {
     return { ...row, verdict: 'unknown', reason: 'merkle stage — proof source needed' };
@@ -270,7 +241,6 @@ async function checkOne(ctx, w) {
   return { ...row, verdict: 'eligible', reason: 'public stage, funded, under cap' };
 }
 
-/* opts: { input, chain, stageId, quantity, wallets:[{id,name,address}], gasLimit } */
 async function check(opts) {
   const info = opts.info || await launchpads.resolve(opts.input, opts.chain);
   const chainKey = opts.chain || info.chain;
@@ -283,8 +253,6 @@ async function check(opts) {
   const priceEth = opts.price != null && opts.price !== '' ? String(opts.price) : String(stage.price || '0');
   const priceWei = ethers.parseEther(priceEth || '0');
 
-  // gas headroom: current fee * gasLimit, doubled so a spike does not flip a
-  // wallet from eligible to underfunded between check and mint
   let gasWei = 0n;
   try {
     const fee = await walletsMod.feeData(chainKey);
@@ -294,15 +262,11 @@ async function check(opts) {
 
   const ctx0 = { info, chainKey, qty, gasWei, rpcUrls: opts.rpcs || rpc.urlsFor(chainKey) };
 
-  /* OpenSea ground truth: one SIWE login + DropEligibilityQuery per wallet
-   * covers every stage at once. Done up front so allStages costs N SIWE, not
-   * N×stages. Failures degrade to unknown per wallet, never block the run. */
   if (info.platform === 'opensea' && info.slug && opts.osEligibility !== false) {
     const { map, err, labels } = await fetchOsEligibility(info, opts.wallets || []);
     ctx0.eligMap = map; ctx0.eligErr = err; ctx0.eligLabels = labels;
   }
 
-  /* Run one stage against all wallets. */
   async function runStage(st) {
     const priceEth = opts.price != null && opts.price !== '' ? String(opts.price) : String(st.price || '0');
     const priceWei = ethers.parseEther(priceEth || '0');
@@ -321,7 +285,6 @@ async function check(opts) {
   }
 
   if (opts.allStages) {
-    /* J-AIO-style matrix: every wallet × every phase, one row per wallet. */
     const out = { chain: c.key, platform: info.platform, address: info.address, slug: info.slug || null,
       name: info.name || null, gasHeadroomEth: Number(ethers.formatEther(gasWei)), matrix: true, stages: [] };
     const byWallet = new Map();

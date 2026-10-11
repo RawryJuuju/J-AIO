@@ -1,7 +1,4 @@
 'use strict';
-/* Launchpad adapters — resolve a paste-in URL into chain + CA + phases + calldata plan.
- * Supported: OpenSea (Seadrop/1155/721 drops), Mintbay, Transient Labs, Blever,
- * LaunchMyNFT (SOL+EVM), Zora, Manifold, generic contract. */
 const { ethers } = require('ethers');
 const store = require('./store');
 const chainsMod = require('./chains');
@@ -67,7 +64,6 @@ async function j(url, opts = {}) {
   return { ok: r.ok, status: r.status, data, text };
 }
 
-/* ---------------- OpenSea ---------------- */
 
 function osKey() {
   const s = store.readSettings();
@@ -75,7 +71,6 @@ function osKey() {
 }
 
 function parseOsUrl(u) {
-  // /collection/slug/overview  |  /item/base/0xCA/1  |  /assets/ethereum/0xCA/1
   const m1 = /opensea\.io\/collection\/([^/?#]+)/.exec(u);
   if (m1) return { slug: m1[1] };
   const m2 = /opensea\.io\/(?:item|assets)\/([^/]+)\/(0x[a-fA-F0-9]{40})/.exec(u);
@@ -103,8 +98,6 @@ async function opensea(url) {
   address = address || c0.address;
   const chainKey = Object.keys(chainsMod.CHAINS).find((k) => chainsMod.CHAINS[k].osSlug === chainSlug) || 'ethereum';
 
-  // drop stages — prefer v2 /drops/{slug} (stage list with labels/times/price),
-  // fall back to the old /collections/{slug}/drop shape for compat.
   const stages = [];
   const dropsUrls = [
     `https://api.opensea.io/api/v2/drops/${slug}`,
@@ -125,9 +118,7 @@ async function opensea(url) {
       const stageName = st.label || st.stage_name || st.name || st.phase_name || st.stage_type || (st.is_public ? 'Public' : `Stage ${stages.length}`);
       const stageType = st.stage_type || st.stageType || st.type || '';
       const publicFlag = st.is_public ?? st.isPublic;
-      // /drops marks public via stage_type=public_sale; /collections/{s}/drop may omit is_public
       const isPublic = publicFlag === true || /public/.test(stageType) || /(^|[_ -])public([_ -]|$)/i.test(`${stageName} ${stageType}`) || /public[_ -]?sale/i.test(`${stageName} ${stageType}`);
-      // price: /drops gives wei string + currency address; old shape gives {value,decimals} or price_per_token
       let price;
       if (st.price?.value != null) price = ethers.formatUnits(String(st.price.value), st.price.decimals ?? 18);
       else if (typeof st.price === 'string' && /^\d+$/.test(st.price)) price = ethers.formatUnits(st.price, 18);
@@ -159,15 +150,10 @@ async function opensea(url) {
   };
 }
 
-/* OpenSea mint calldata via their API (per-wallet, signature-bearing). */
-/* dispatcher is optional: when the run picked a proxy group, each wallet's mint
-   call goes out through a different exit IP so OpenSea sees N clients, not one. */
 async function openseaMintData(chainKey, slug, stageId, walletAddress, quantity, dispatcher) {
   const key = osKey();
   if (!key) throw new Error('OpenSea API key required');
   const c = chainsMod.chain(chainKey);
-  // v2 drops mint — needs minter (wallet that signs/mints), no stage_id/recipient.
-  // Returns signed mintSigned calldata for the SeaDrop contract.
   const body = JSON.stringify({ minter: walletAddress, quantity: Number(quantity) || 1 });
   const r = await j(`https://api.opensea.io/api/v2/drops/${slug}/mint`, {
     method: 'POST', headers: { 'X-API-KEY': key, 'content-type': 'application/json' }, body, dispatcher,
@@ -178,10 +164,6 @@ async function openseaMintData(chainKey, slug, stageId, walletAddress, quantity,
   return { to: t.to, data: t.data, value: BigInt(t.value ?? 0), chainId: c.id };
 }
 
-/* ---- SCAM GUARD: full drop stage snapshot ----
- * Stage view from the v2 drops API so the mint guard can detect a creator
- * moving the schedule, changing the price, ending a stage early, or letting
- * a different phase take over. Returns prices as wei BigInts. */
 async function openseaDropStages(slug) {
   const H = { 'X-API-KEY': osKey() || '', 'accept': 'application/json', 'user-agent': UA };
   const r = await j(`https://api.opensea.io/api/v2/drops/${slug}`, { headers: H });
@@ -208,19 +190,15 @@ async function openseaDropStages(slug) {
   };
 }
 
-/* ---- FCFS: stage schedule re-check (schedule guard) ----
- * Returns [{id, startTime}] — thin wrapper kept for compatibility. */
 async function openseaDropStageTimes(slug) {
   const snap = await openseaDropStages(slug);
   return snap.stages.map((s) => ({ id: s.id, label: s.label, startTime: s.startTime }));
 }
 
-/* ---- FCFS: connection warming ping (cheap public endpoint) ---- */
 async function openseaKeepWarm() {
   await j('https://api.opensea.io/api/v2/chains', { headers: { 'X-API-KEY': osKey() || '', 'accept': 'application/json', 'user-agent': UA } });
 }
 
-/* ---- FCFS: resolve a drop's contract address for the gql swap query ---- */
 async function openseaDropContract(slug) {
   const H = { 'X-API-KEY': osKey() || '', 'accept': 'application/json', 'user-agent': UA };
   const r = await j(`https://api.opensea.io/api/v2/collections/${slug}`, { headers: H });
@@ -228,12 +206,6 @@ async function openseaDropContract(slug) {
   return r.data.contracts?.[0]?.address || null;
 }
 
-/* ---- FCFS: internal gql swap(action:MINT) calldata, alias-batched ----
- * One GraphQL request fetches signed mint calldata for many wallets at once:
- *   query B { w0: swap(address:"0x..", ...) {...}, w1: swap(...) {...} }
- * Session = SIWE cookie of ANY wallet (the query accepts arbitrary addresses).
- * Undocumented internal API — callers must treat every failure as "fall back
- * to the v2 path", never as a hard stop. */
 const GQL_URL = 'https://gql.opensea.io/graphql';
 const OS_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -279,10 +251,8 @@ async function openseaMintDataGqlBatch(chainKey, contractAddress, wallets, quant
   return out;
 }
 
-/* ---------------- Mintbay (hex-based, no API auth) ---------------- */
 
 async function mintbay(url) {
-  // https://mintbay.xyz/mint/<chainId>/<contract>
   const m = /mintbay\.xyz\/(?:mint|collection)\/(\d+)\/(0x[a-fA-F0-9]{40})/i.exec(url);
   if (!m) throw new Error('bad Mintbay URL (expect /mint/<chainId>/<address>)');
   const chainId = Number(m[1]);
@@ -290,7 +260,6 @@ async function mintbay(url) {
   const c = chainsMod.byId(chainId);
   if (!c) throw new Error(`Mintbay chain ${chainId} not in registry`);
   const probe = await abiMod.probeContract(c.key, address).catch(() => null);
-  // Mintbay editions: mint(uint256 quantity) payable, price from probe
   return {
     platform: 'mintbay', chain: c.key, address, name: probe?.name || null,
     stages: (probe?.phases || []).map((ph, i) => ({ id: String(i), name: ph.name, price: ph.price, maxPerWallet: ph.maxPerWallet, isPublic: true })),
@@ -300,7 +269,6 @@ async function mintbay(url) {
   };
 }
 
-/* ---------------- Transient Labs ---------------- */
 
 async function transient(url) {
   const m = /(0x[a-fA-F0-9]{40})/.exec(url);
@@ -310,7 +278,6 @@ async function transient(url) {
   if (/\/base\//i.test(url) || /chain=base/i.test(url)) chainKey = 'base';
   if (/\/shape\//i.test(url)) chainKey = 'shape';
   const probe = await abiMod.probeContract(chainKey, address).catch(() => null);
-  // TL Shatter/Stacks use mint(address,uint256) or mint(uint256,bytes32[])
   return {
     platform: 'transient', chain: chainKey, address, name: probe?.name || null,
     stages: (probe?.phases || []).map((ph, i) => ({ id: String(i), name: ph.name, price: ph.price, maxPerWallet: ph.maxPerWallet, isPublic: true })),
@@ -319,7 +286,6 @@ async function transient(url) {
   };
 }
 
-/* ---------------- Blever ---------------- */
 
 async function blever(url) {
   const m = /(0x[a-fA-F0-9]{40})/.exec(url);
@@ -345,10 +311,8 @@ async function blever(url) {
   };
 }
 
-/* ---------------- LaunchMyNFT ---------------- */
 
 async function launchmynft(url) {
-  // EVM: launchmynft.io/collections/<chain>/<contract>  SOL: /collections/<wallet>/<hash>
   const parts = url.split('/').filter(Boolean);
   const i = parts.findIndex((p) => p === 'collections');
   const mi = parts.findIndex((p) => p === 'mint');
@@ -369,7 +333,6 @@ async function launchmynft(url) {
   throw new Error('LaunchMyNFT Solana collections are not supported');
 }
 
-/* ---------------- Zora ---------------- */
 
 async function zora(url) {
   const m = /(0x[a-fA-F0-9]{40})/.exec(url);
@@ -390,7 +353,6 @@ async function zora(url) {
   };
 }
 
-/* ---------------- Manifold ---------------- */
 
 async function manifold(url) {
   const m = /(0x[a-fA-F0-9]{40})/.exec(url);
@@ -407,7 +369,6 @@ async function manifold(url) {
   };
 }
 
-/* ---------------- Scatter ---------------- */
 
 async function scatter(url) {
   const m = /scatter\.art\/(?:c\/)?([^/?#]+)/i.exec(url);
@@ -436,7 +397,6 @@ async function scatter(url) {
       id: l.id || String(i), name: l.name || `List ${i}`,
       price: l.token_price != null ? String(l.token_price) : '0',
       maxPerWallet: l.wallet_limit ?? null, isPublic: /public/i.test(l.name || ''),
-      // J-AIO binary struct scatter.inviteListResponse carries json:"merkleRoot"; accept both shapes
       root: l.root || l.merkleRoot || null,
     };
   });
@@ -445,7 +405,6 @@ async function scatter(url) {
     note: 'Scatter resolver read-only. No mint endpoint or calldata builder.' };
 }
 
-/* ---------------- generic contract ---------------- */
 
 async function contractOnly(address, chainKey) {
   const probe = await abiMod.probeContract(chainKey || 'ethereum', address);
@@ -462,7 +421,6 @@ async function contractOnly(address, chainKey) {
   };
 }
 
-/* ---------------- dispatcher ---------------- */
 
 async function resolve(input, chainHint) {
   const d = detect(input);

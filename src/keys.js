@@ -1,14 +1,4 @@
 'use strict';
-/* Multi-API-key pool with round-robin rotation.
- *
- * A single OpenSea key rate-limits hard (4 rps, 429 after that), so bulk work
- * — inventory, PnL over 100 wallets, eligibility sweeps — needs several keys.
- * Settings hold both shapes:
- *   openseaKey   : legacy single value
- *   openseaKeys  : newline/comma separated list
- * Both are merged, deduped, and handed out round-robin. Callers that hit a
- * 429/401 call `penalise()` so the bad key is skipped for a cooldown window.
- */
 const store = require('./store');
 
 const cursor = new Map();      // field -> next index
@@ -23,8 +13,6 @@ function listFor(field) {
   return [...new Set([...single, ...many])];
 }
 
-/* Keys that are not inside their penalty window, or all of them when every
- * key is penalised (better to retry a cooling key than to fail outright). */
 function usable(field) {
   const all = listFor(field);
   const now = Date.now();
@@ -53,7 +41,6 @@ function penalise(key, ms) {
   penalty.set(key, Date.now() + (ms || PENALTY_MS));
 }
 
-/* Status for the UI: how many keys, how many currently cooling down. */
 function status(field) {
   const all = listFor(field);
   const now = Date.now();
@@ -63,11 +50,6 @@ function status(field) {
   };
 }
 
-/* ---------- latency probe ----------
- * J-AIO shows a green/amber latency badge next to each API key. Useful signal:
- * a key that answers in 180ms is healthy, one that 401s is a typo, and one that
- * 429s is already burnt. Each provider needs its own cheap authenticated call.
- */
 const PROBES = {
   openseaKey: (k) => ({
     url: 'https://api.opensea.io/api/v2/collections?limit=1',
@@ -90,7 +72,6 @@ const PROBES = {
   }),
 };
 
-/* Keys are masked in the response — the UI only needs to tell them apart. */
 function mask(k) {
   const s = String(k);
   return s.length <= 10 ? s.slice(0, 3) + '…' : s.slice(0, 5) + '…' + s.slice(-4);
@@ -110,7 +91,6 @@ async function probeOne(field, key) {
     if (r.status === 401 || r.status === 403) return { key: mask(key), state: 'bad', ms, note: `auth ${r.status}` };
     if (r.status === 429) return { key: mask(key), state: 'limited', ms, note: 'rate limited' };
     if (!r.ok) return { key: mask(key), state: 'bad', ms, note: `HTTP ${r.status}` };
-    // Etherscan and the JSON-RPC hosts answer 200 with an error envelope.
     if (/"status"\s*:\s*"0"/.test(body) && /Invalid API Key/i.test(body)) {
       return { key: mask(key), state: 'bad', ms, note: 'invalid API key' };
     }

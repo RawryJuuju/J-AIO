@@ -1,6 +1,4 @@
 'use strict';
-/* Wallet manager — EVM / Solana / Bitcoin. Groups, generate, import, balances,
- * single send, disperse/consolidate, EIP-7702 delegation check. */
 const { ethers } = require('ethers');
 const store = require('./store');
 const chains = require('./chains');
@@ -13,7 +11,6 @@ function save(kind, d) { return store.writeSealed(KIND[kind], d); }
 
 function nid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-/* ---------------- groups ---------------- */
 
 function addGroup(kind, name) {
   const d = load(kind);
@@ -39,7 +36,6 @@ function groups(kind) {
   return d.groups.map((g) => ({ id: g.id, name: g.name, count: g.wallets.length }));
 }
 
-/* Wallets without private keys — safe for UI. */
 function listSafe(kind, groupIds) {
   const d = load(kind);
   const sel = groupIds && groupIds.length ? d.groups.filter((g) => groupIds.includes(g.id)) : d.groups;
@@ -57,7 +53,6 @@ function getWallet(kind, id) {
   return null;
 }
 
-/* ---------------- key handling ---------------- */
 
 function evmFromKey(pk) {
   const k = pk.trim();
@@ -100,7 +95,6 @@ function derive(kind, key) {
   throw new Error('bad kind');
 }
 
-/* ---------------- generate / import ---------------- */
 
 function generate(kind, groupId, count, prefix) {
   const d = load(kind);
@@ -126,7 +120,6 @@ function generate(kind, groupId, count, prefix) {
   return made;
 }
 
-/* Import: lines of `pk` or `name,pk` or `name,address,pk` (CSV) */
 function importKeys(kind, groupId, text) {
   const d = load(kind);
   const g = d.groups.find((x) => x.id === groupId);
@@ -167,7 +160,6 @@ function bulkRename(kind, ids, pattern) {
   for (const g of d.groups) {
     for (const w of g.wallets) {
       if (!order.includes(w.id)) continue;
-      // {i} = 1-based index in the selection, {n} = the wallet's previous name
       const i = order.indexOf(w.id) + 1;
       w.name = String(pattern).replace(/\{i\}/g, String(i)).replace(/\{n\}/g, w.name);
       updated++;
@@ -195,7 +187,6 @@ function exportKeys(kind, ids) {
   return out.join('\n');
 }
 
-/* ---------------- EVM balances ---------------- */
 
 const ERC20 = new ethers.Interface([
   'function balanceOf(address) view returns (uint256)',
@@ -237,7 +228,6 @@ async function balances(chainKey, addresses, erc20) {
   return out;
 }
 
-/* ---------------- gas helpers ---------------- */
 
 async function feeData(chainKey, opts = {}) {
   const settings = store.readSettings();
@@ -251,8 +241,6 @@ async function feeData(chainKey, opts = {}) {
   const doubled = base * 2n + ethers.parseUnits('0.01', 'gwei');
   if (maxFee < doubled) maxFee = doubled;
   if (maxFee < maxPriority) maxFee = maxPriority;
-  // baseFeePerGas = what the chain charges per gas unit (Etherscan "base").
-  // expectedGwei = base + (multiplied) tip = what a tx actually pays per gas.
   const rawTip = fd.maxPriorityFeePerGas ?? 0n;
   let baseFee;
   if (fd.gasPrice && fd.gasPrice > rawTip) baseFee = fd.gasPrice - rawTip;
@@ -262,7 +250,6 @@ async function feeData(chainKey, opts = {}) {
   return { maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPriority, gasPrice: fd.gasPrice ?? null, baseFeePerGas: baseFee, expectedGwei };
 }
 
-/* ---------------- EVM single send ---------------- */
 
 async function sendNative(chainKey, walletId, to, amountEth, opts = {}) {
   const c = chains.chain(chainKey);
@@ -281,7 +268,6 @@ async function sendNative(chainKey, walletId, to, amountEth, opts = {}) {
     value = bal - cost;
     if (value <= 0n) throw new Error('balance below gas cost');
     if (!opts.gasLimit) {
-      // destination may be a contract / EIP-7702 delegated EOA (intrinsic gas > 21000)
       try {
         const est = await p.estimateGas({ from: w.address, to, value });
         if (est > gasLimit) { gasLimit = est; value = bal - gasLimit * fee.maxFeePerGas; }
@@ -334,7 +320,6 @@ async function sendToken(chainKey, walletId, token, to, amount, opts = {}) {
   return { hash: res.hash, from: w.address };
 }
 
-/* Unwrap WETH -> ETH */
 async function unwrapWeth(chainKey, walletId, amount) {
   const c = chains.chain(chainKey);
   if (!c.weth) throw new Error('no WETH on this chain');
@@ -359,10 +344,6 @@ async function unwrapWeth(chainKey, walletId, amount) {
   return { hash: res.hash, amount: ethers.formatEther(val) };
 }
 
-/* ---------------- disperse / consolidate ----------------
-   Disperse always sends individual transfers from the source wallet.
-   No third-party disperse.app-style contract is ever touched: every tx is
-   signed locally and goes straight recipient-ward. */
 
 const ERC20_ABI = new ethers.Interface([
   'function transfer(address to, uint256 amount) returns (bool)',
@@ -382,7 +363,6 @@ async function tokenMeta(p, addr) {
   return { symbol, decimals };
 }
 
-/* J-AIO amountMode: fixed | random | max ; strategy: amount | target */
 async function disperse(chainKey, sourceWalletId, targets, opts = {}) {
   const c = chains.chain(chainKey);
   const w = getWallet('evm', sourceWalletId);
@@ -409,7 +389,6 @@ async function disperse(chainKey, sourceWalletId, targets, opts = {}) {
   const decimals = meta ? meta.decimals : 18;
   const fmt = (wei) => ethers.formatUnits(wei, decimals);
 
-  /* ---- build plan (wei per recipient) ---- */
   let plan;
   const bal = tokenAddr
     ? await p.call({ to: tokenAddr, data: ERC20_ABI.encodeFunctionData('balanceOf', [w.address]) }).then((r) => ERC20_ABI.decodeFunctionResult('balanceOf', r)[0])
@@ -462,8 +441,6 @@ async function disperse(chainKey, sourceWalletId, targets, opts = {}) {
   const total = plan.reduce((a, b) => a + b.wei, 0n);
   if (tokenAddr && total > bal) throw new Error(`insufficient token balance: need ${fmt(total)} ${meta.symbol}, have ${fmt(bal)}`);
 
-  /* Individual sends (native value or ERC20 transfer) — direct from source,
-     no intermediary contract. */
   let nonce = await p.getTransactionCount(w.address, 'pending');
   const sent = [];
   for (const t of plan) {
@@ -545,7 +522,6 @@ async function consolidate(chainKey, walletIds, destination, opts = {}) {
   return out;
 }
 
-/* ---------------- EIP-7702 delegation ---------------- */
 
 async function checkDelegation(chainKey, addresses) {
   const c = chains.chain(chainKey);
@@ -554,7 +530,6 @@ async function checkDelegation(chainKey, addresses) {
   await Promise.all(addresses.map(async (a, i) => {
     try {
       const code = await rpc.provider(urls[i % urls.length], c.id).getCode(a);
-      // EIP-7702 delegation designator: 0xef0100 || address (23 bytes)
       if (code && code.toLowerCase().startsWith('0xef0100')) {
         out[a] = { delegated: true, target: '0x' + code.slice(8, 48) };
       } else out[a] = { delegated: false, code: code === '0x' ? null : code.slice(0, 12) + '…' };
@@ -563,7 +538,6 @@ async function checkDelegation(chainKey, addresses) {
   return out;
 }
 
-/* Revoke = set delegation target to zero address via type-4 tx. */
 async function revokeDelegation(chainKey, walletId) {
   const c = chains.chain(chainKey);
   const w = getWallet('evm', walletId);
@@ -582,7 +556,6 @@ async function revokeDelegation(chainKey, walletId) {
   return { hash: tx.hash };
 }
 
-/* ---------------- Solana ---------------- */
 
 function solConn() {
   const settings = store.readSettings();
@@ -653,7 +626,6 @@ async function solDisperse(sourceId, targets, opts = {}) {
   return out;
 }
 
-/* ---------------- Bitcoin (balance only + fee params) ---------------- */
 
 async function btcBalances(addresses) {
   const { fetch } = require('undici');
@@ -669,10 +641,6 @@ async function btcBalances(addresses) {
   return out;
 }
 
-/* Batch EIP-7702 delegation scan across a wallet group. Read-only inventory:
-   which wallets carry code, and for designated-delegation code (0xef0100 +
-   20-byte target) who the target is. Concurrency 4 — sufficient for 100+
-   wallets without hammering the RPC. */
 async function scanDelegation(chainKey, groupIds) {
   const c = chains.chain(chainKey);
   const list = listSafe('evm', groupIds);

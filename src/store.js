@@ -1,6 +1,4 @@
 'use strict';
-/* Encrypted local store. AES-256-GCM, key derived from master password via scrypt.
- * Linux equivalent of J-AIO's DPAPI-sealed .dat files. */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -17,8 +15,6 @@ let MASTER_KEY = null;          // Buffer(32) once unlocked
 let SESSION_TOKEN = null;
 const cache = new Map();        // name -> parsed object
 
-/* KDF params. v1 = legacy (weak), v2 = current. Params are read from the
- * verify file so old vaults keep opening while new ones get the strong cost. */
 const KDF = {
   1: { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 },
   2: { N: 1 << 17, r: 8, p: 1, maxmem: 320 * 1024 * 1024 },
@@ -33,7 +29,6 @@ function deriveKey(password, salt, v) {
 function sealPath(name) { return path.join(DATA_DIR, name + '.dat'); }
 function plainPath(name) { return path.join(DATA_DIR, name + '.json'); }
 
-/* ---------- idle auto-lock ---------- */
 
 let lastActivity = Date.now();
 let idleMs = 15 * 60 * 1000;    // 0 disables
@@ -44,7 +39,6 @@ function setIdleTimeout(minutes) {
   return idleMs / 60000;
 }
 function getIdleTimeout() { return idleMs / 60000; }
-/* Returns true if it just locked the vault. */
 function idleCheck() {
   if (!MASTER_KEY || !idleMs) return false;
   if (Date.now() - lastActivity < idleMs) return false;
@@ -52,7 +46,6 @@ function idleCheck() {
   return true;
 }
 
-/* ---------- master password lifecycle ---------- */
 
 const VERIFY_FILE = path.join(DATA_DIR, 'vault.verify');
 
@@ -73,7 +66,6 @@ function initMaster(password) {
   return true;
 }
 
-/* ---------- unlock throttle ---------- */
 
 let failCount = 0;
 let lockoutUntil = 0;
@@ -103,8 +95,6 @@ function unlock(password) {
   return true;
 }
 
-/* Verify a password without changing session state — used to gate key export.
- * Shares the same lockout counter so it cannot be used as a brute-force oracle. */
 function verifyPassword(password) {
   if (!isInitialized() || !password) return false;
   const now = Date.now();
@@ -137,7 +127,6 @@ function hasSessionToken(token) {
 }
 function requireUnlocked() { if (!MASTER_KEY) throw new Error('LOCKED'); }
 
-/* ---------- sealed (encrypted) stores ---------- */
 
 function readSealed(name, fallback) {
   requireUnlocked();
@@ -171,7 +160,6 @@ function writeSealed(name, obj) {
   return true;
 }
 
-/* ---------- plain stores (no secrets inside) ---------- */
 
 function readPlain(name, fallback) {
   const p = plainPath(name);
@@ -186,18 +174,15 @@ function writePlain(name, obj) {
   return true;
 }
 
-/* ---------- settings: secrets sealed, rest plain ---------- */
 
 const SECRET_FIELDS = [
   'etherscanKey', 'openseaKey', 'heliusKey', 'alchemyKey', 'flashbotsAuthKey',
-  // plural = multi-key pools (newline/comma separated), same secrecy as singular
   'etherscanKeys', 'openseaKeys', 'heliusKeys', 'alchemyKeys',
 ];
 const SECRET_SETTING_KEYS = new Set(SECRET_FIELDS);
 
 function isSecretSetting(k) { return SECRET_SETTING_KEYS.has(k); }
 
-/* Merged view. Secrets only present when unlocked. */
 function readSettings() {
   const plain = readPlain('settings', {});
   for (const k of Object.keys(plain)) if (SECRET_SETTING_KEYS.has(k)) delete plain[k];
@@ -218,8 +203,6 @@ function writeSettings(next) {
   return readSettings();
 }
 
-/* One-time: pull any API keys that were left in plaintext settings.json
- * into the sealed store and scrub the plaintext copy. */
 function migrateSettings() {
   if (!MASTER_KEY) return;
   const plain = readPlain('settings', null);
@@ -233,10 +216,7 @@ function migrateSettings() {
   appendLog('security.log', `migrated ${found.length} plaintext API key(s) into sealed store`);
 }
 
-/* ---------- append-only log ---------- */
 
-/* Logs grow forever otherwise, and tailLog() reads the whole file into memory.
- * Rotate at 5 MB, keep one .1 generation. */
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
 function rotateIfBig(p) {
@@ -260,11 +240,9 @@ function tailLog(file, n = 200) {
   return lines.slice(-Math.max(1, Math.min(2000, n)));
 }
 
-/* ---------- server-facing aliases ---------- */
 
 function isLocked() { return MASTER_KEY === null; }
 
-/* First run: create the vault. Later runs: verify + unlock (throws on bad password). */
 function initVault(password) {
   if (!password || String(password).length < 8) throw new Error('master password must be at least 8 characters');
   if (!isInitialized()) return initMaster(password);

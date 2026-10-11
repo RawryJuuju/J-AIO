@@ -1,20 +1,4 @@
 'use strict';
-/* Whitelist checker + project book.
- *
- * Two things J-AIO's WHITELISTS tab does that the single-stage eligibility
- * check cannot:
- *
- *   1. CHECKER — one drop link, every stage at once, one column per stage and
- *      one row per wallet. Cells hold the cumulative wallet cap up to and
- *      including that stage, which is what you actually need when deciding how
- *      much ETH to disperse. Progress streams so a 105-wallet sweep is visible
- *      while it runs instead of hanging for two minutes.
- *
- *   2. MANAGER — saved projects. A check result is worth keeping: which wallets
- *      were eligible for which phase, at what price, so months later you can
- *      still fund exactly those wallets and spin up mint tasks from the saved
- *      list. Sealed store, because it holds wallet addresses.
- */
 const { EventEmitter } = require('events');
 const { ethers } = require('ethers');
 const crypto = require('crypto');
@@ -32,7 +16,6 @@ const runs = new Map();
 const CONC = 6;
 const STORE = 'wl_projects';
 
-/* ---------------- project book ---------------- */
 
 function readBook() {
   try { return store.readSealed(STORE, { projects: [] }); } catch { return { projects: [] }; }
@@ -105,8 +88,6 @@ function updateProject(id, fields) {
   return p;
 }
 
-/* Wallet ids eligible for a saved phase — feeds "Create Tasks" and
- * "Fund Wallets" straight from the manager. */
 function phaseWallets(projectId, phaseId) {
   const p = (readBook().projects || []).find((x) => x.id === projectId);
   if (!p) throw new Error('project not found');
@@ -115,7 +96,6 @@ function phaseWallets(projectId, phaseId) {
   return { project: { id: p.id, name: p.name, address: p.address, slug: p.slug, chain: p.chain }, phase: ph };
 }
 
-/* ---------------- multi-stage checker ---------------- */
 
 function emit(runId, payload) {
   const r = runs.get(runId);
@@ -123,10 +103,6 @@ function emit(runId, payload) {
   bus.emit('event', { runId, ...payload });
 }
 
-/* Stage caps in a drop are usually cumulative in the UI even when the contract
- * counts them separately: "GTD 3 / WL 5" means a GTD wallet can take 3 in the
- * first window and 2 more later, capped at 5 total. We display the running max
- * so the number in the cell is the wallet's ceiling by that point. */
 function cumulativeCaps(stages) {
   let run = 0;
   return stages.map((s) => {
@@ -159,8 +135,6 @@ async function checkStagesForWallet(ctx, w) {
   return out;
 }
 
-/* Custom Whitelist Checker module — allows manually adding or loading a list of
-   eligible addresses for custom phases (J-AIO-style TierSet/BoolPhase/ListPhase). */
 const customCheckers = new Map();
 
 function addCustomChecker(name, phases) {
@@ -177,15 +151,11 @@ async function startCheck(opts) {
   const chainKey = opts.chain || info.chain;
   const c = chainsMod.chain(chainKey);
 
-  // WL matrix prefers allowlist phases. If only public phases exist, keep them
-  // so the user can inspect phase times/price rather than throwing an error.
   let stages = (info.stages || []).filter((s) => !s.isPublic);
   if (!stages.length) stages = info.stages || [];
   if (!stages.length) throw new Error('No mint phases found for this collection');
   const caps = cumulativeCaps(stages);
 
-  /* full wallet objects (keys stay server-side) — needed for the OpenSea SIWE
-   * eligibility check, which signs a login message per wallet */
   const list = (opts.walletIds && opts.walletIds.length)
     ? opts.walletIds.map((id) => walletsMod.getWallet('evm', id)).filter(Boolean)
     : (() => {
@@ -223,8 +193,6 @@ async function startCheck(opts) {
   };
 
   (async () => {
-    /* OpenSea ground truth first: SIWE login + DropEligibilityQuery per wallet
-     * (same mechanism as OpenSea's own UI). One pass covers all stages. */
     if (info.platform === 'opensea' && info.slug) {
       emit(runId, { level: 'info', msg: `OpenSea eligibility (SIWE) — ${list.length} wallets, 2 at a time…` });
       try {
@@ -295,8 +263,6 @@ function listChecks() {
   }));
 }
 
-/* Persist a finished check as a project. Only eligible wallets are stored, one
- * bucket per stage, so the saved list is directly actionable. */
 function saveCheck(runId, extra = {}) {
   const r = runs.get(runId);
   if (!r) throw new Error('run not found');

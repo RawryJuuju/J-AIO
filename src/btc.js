@@ -1,7 +1,6 @@
 const fetch = require('node-fetch');
 const store = require('./store');
 
-// mempool.space API base per network
 function getMempoolUrl(network = 'mainnet') {
   return network === 'testnet' ? 'https://mempool.space/testnet/api' : 'https://mempool.space/api';
 }
@@ -32,11 +31,9 @@ async function broadcastTx(txHex, network = 'mainnet') {
 }
 
 async function sendBtc({ fromWif, toAddress, amountSat, feeRate, network = 'mainnet' }) {
-  // Simple BTC transfer helper (fallback payload for raw UTXO building or RPC broadcast)
   if (!fromWif || !toAddress || !amountSat) {
     throw new Error('fromWif, toAddress, and amountSat are required');
   }
-  // Fetch UTXOs
   const utxos = await getUtxos(fromWif.address || fromWif, network);
   const totalIn = utxos.reduce((acc, u) => acc + u.value, 0);
   if (totalIn < amountSat) {

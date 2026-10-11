@@ -1,4 +1,3 @@
-/* BTC & PnL page UI script */
 page('btc', {
   label: 'BTC Transfer', group: 'Infra', icon: 'tools',
   render(el) {

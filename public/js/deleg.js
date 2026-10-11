@@ -1,9 +1,4 @@
 'use strict';
-/* Delegation scan — EIP-7702 inventory across wallet groups.
- * Read-only: which wallets carry code, and for designated-delegation code
- * (0xef0100 + 20-byte target) who the target is. Send paths already handle
- * the gas edge (see the vault 0xe455…16d1 intrinsic-gas case); this screen
- * just answers "who is delegated" in one shot. */
 
 page('deleg', {
   label: 'Delegation Scan', group: 'Wallets', icon: 'rpc',

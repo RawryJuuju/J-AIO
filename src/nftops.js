@@ -1,5 +1,4 @@
 'use strict';
-/* NFT ops — inventory, auto-transfer, Seaport 1.6 listing, accept WETH offers, PnL. */
 const { ethers } = require('ethers');
 const store = require('./store');
 const chainsMod = require('./chains');
@@ -35,9 +34,6 @@ const SEAPORT_IFACE = new ethers.Interface([
   'function fulfillOrder(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes),bytes32) payable returns (bool)',
   'function validate(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[]) returns (bool)',
 ]);
-/* Seaport 1.6 cancel — encoded WITHOUT an AbiParser fragment: ethers v6 rejects
-   the cancel OrderComponents[] tuple in some versions, keep the selector +
-   AbiCoder raw-array form (selectors verified on-chain). */
 const CANCEL_SELECTOR = '0xfd9f1e10'; // cancel((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[])
 const CANCEL_TUPLE = '(address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[]';
 function cancelCallData(comp) {
@@ -49,9 +45,6 @@ function cancelCallData(comp) {
 
 function osKey() { return keys.next('openseaKey'); }
 
-/* Rotates across every OpenSea key in Settings. A 429/401 penalises that key
- * and the request is retried on the next one, so bulk PnL/inventory over many
- * wallets no longer dies on a single key's rate limit. */
 async function osFetch(path, opts = {}) {
   const { fetch } = require('undici');
   const attempts = Math.max(1, Math.min(4, keys.count('openseaKey') || 1));
@@ -73,7 +66,6 @@ async function osFetch(path, opts = {}) {
   throw last;
 }
 
-/* ---------------- inventory ---------------- */
 
 async function inventory(chainKey, addresses, opts = {}) {
   const c = chainsMod.chain(chainKey);
@@ -98,7 +90,6 @@ async function inventory(chainKey, addresses, opts = {}) {
   return out;
 }
 
-/* ---------------- transfer / sweep ---------------- */
 
 async function transferNft(chainKey, walletId, contract, tokenId, to, opts = {}) {
   const c = chainsMod.chain(chainKey);
@@ -129,11 +120,6 @@ async function transferNft(chainKey, walletId, contract, tokenId, to, opts = {})
   return { hash: res.hash, from: w.address, tokenId };
 }
 
-/* Sweep every NFT of a collection from many wallets to one destination.
- * FAST mode (default): wallets processed in parallel (opts.parallel, default 3),
- * gas estimated ONCE per standard per wallet, and every transfer is broadcast
- * back-to-back with pipelined nonces — no waiting between sends. Set
- * opts.delayMs to fall back to the old sequential behavior. */
 async function sweepCollection(chainKey, walletIds, contract, to, opts = {}) {
   if (opts.bulk) return sweepCollectionBulk(chainKey, walletIds, contract, to, opts);
   const perWallet = async (id) => {
@@ -149,7 +135,6 @@ async function sweepCollection(chainKey, walletIds, contract, to, opts = {}) {
     let nonce = await p.getTransactionCount(w.address, 'pending');
 
     if (opts.delayMs) {
-      /* legacy sequential mode */
       const seq = [];
       for (const n of items) {
         try {
@@ -161,7 +146,6 @@ async function sweepCollection(chainKey, walletIds, contract, to, opts = {}) {
       return seq;
     }
 
-    /* fast mode: estimate gas once per standard, fire everything in parallel */
     const gasByStd = {};
     const firstByStd = {};
     for (const n of items) { const s = n.standard === 'erc1155' ? 'erc1155' : 'erc721'; if (!firstByStd[s]) firstByStd[s] = n; }
@@ -187,16 +171,6 @@ async function sweepCollection(chainKey, walletIds, contract, to, opts = {}) {
   return flat;
 }
 
-/* ---------------- bulk transfers (many NFTs, fewer txs) ----------------
- * Two levels:
- *  1) transferBatch  — one HTTP call for many NFTs across wallets/contracts;
- *     per wallet the transfers are nonce-pipelined and broadcast in parallel
- *     (still 1 tx per NFT, but no sequential waiting).
- *  2) sweepCollectionBulk — ONE tx per wallet via the BatchNftSender helper
- *     contract (contracts/BatchNftSender.sol, artifact in src/). First use of
- *     a wallet on a collection costs one setApprovalForAll; after that every
- *     sweep is a single tx regardless of how many NFTs move.
- */
 
 let _batchIface = null;
 function batchIface() {
@@ -210,8 +184,6 @@ function getBatchSender(chainKey) {
   return d[String(chainKey).toLowerCase()] || null;
 }
 
-/* Deploy BatchNftSender on a chain (deployer wallet pays the deploy gas,
- * ~200k). Address cached in data/batch_sender.json. Idempotent. */
 async function deployBatchSender(chainKey, walletId) {
   const c = chainsMod.chain(chainKey);
   const w = wallets.getWallet('evm', walletId);
@@ -247,8 +219,6 @@ async function deployBatchSender(chainKey, walletId) {
   return { address, hash: res.hash, live, deployer: w.address };
 }
 
-/* Transfer many NFTs (any mix of wallets/contracts/standards) in ONE request.
- * items: [{ walletId, contract, tokenId, standard, amount? }] */
 async function transferBatch(chainKey, items, to, opts = {}) {
   const byWallet = {};
   for (const it of items || []) {
@@ -287,11 +257,6 @@ async function transferBatch(chainKey, items, to, opts = {}) {
   return flat;
 }
 
-/* Sweep with ONE tx per wallet per standard via BatchNftSender.
- * opts.deployerWalletId — who pays the one-time deploy if no sender on chain
- * (defaults to the first wallet in the list). Wallets where the batch route
- * fails simulation (e.g. operator-filtered collections) fall back to the
- * per-NFT fast mode automatically. */
 async function sweepCollectionBulk(chainKey, walletIds, contract, to, opts = {}) {
   const c = chainsMod.chain(chainKey);
   let sender = getBatchSender(chainKey);
@@ -335,7 +300,6 @@ async function sweepCollectionBulk(chainKey, walletIds, contract, to, opts = {})
           : iface.encodeFunctionData('send721', [contract, slice.map((n) => BigInt(n.tokenId)), to]);
         if (!approved && !approvalSent) {
           const setData = ERC721.encodeFunctionData('setApprovalForAll', [sender, true]);
-          /* simulate first — operator-filtered collections revert here */
           try { await p.call({ from: w.address, to: contract, data: setData }); }
           catch { throw Object.assign(new Error('approval sim failed (operator-filtered collection?)'), { simFailed: true }); }
           const apRaw = await signer.signTransaction({ chainId: c.id, to: contract, data: setData, nonce: nonce++, gasLimit: 90000n, maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas, type: 2 });
@@ -345,8 +309,6 @@ async function sweepCollectionBulk(chainKey, walletIds, contract, to, opts = {})
         }
         let gasLimit;
         if (approvalSent) {
-          /* approval still pending on-chain -> estimateGas would sim against
-           * unapproved state and fail; use a generous formula instead. */
           gasLimit = 100000n + 75000n * BigInt(slice.length);
         } else {
           try { gasLimit = await p.estimateGas({ from: w.address, to: sender, data }) * 13n / 10n; }
@@ -376,7 +338,6 @@ async function sweepCollectionBulk(chainKey, walletIds, contract, to, opts = {})
   return { sender, results };
 }
 
-/* ---------------- approvals ---------------- */
 
 async function ensureApproval(chainKey, walletId, contract, opts = {}) {
   const c = chainsMod.chain(chainKey);
@@ -399,7 +360,6 @@ async function ensureApproval(chainKey, walletId, contract, opts = {}) {
   return { approved: false, hash: res.hash, waiting: true };
 }
 
-/* ---------------- Seaport listing ---------------- */
 
 const ORDER_TYPES = {
   OrderComponents: [
@@ -422,17 +382,7 @@ const ORDER_TYPES = {
   ],
 };
 
-/* ---------- OpenSea listing actions (server-built order) ---------- */
 
-/* OpenSea's /api/v2/listings/actions returns the Seaport order it wants us to
- * sign — zone (Signed Zone V2 where the collection requires it), orderType,
- * zoneHash, conduit and every fee consideration item come from OpenSea itself,
- * which is the only source that matches its own listing validation. Hand-built
- * orders failed that validation ("requires Signed Zone V2", "not provided all
- * required creator fees"), so we sign only what OpenSea generated.
- * Steps are free-form JsonNode in proto3 JSON: default values (zone "0x0",
- * orderType 0, counter "0") are OMITTED, so every field needs an explicit
- * default before signing. Find the order by shape, not exact key names. */
 function pick(o, camel, snake, dflt) {
   const v = o[camel] !== undefined ? o[camel] : (snake ? o[snake] : undefined);
   return v === undefined || v === null || v === '' ? dflt : v;
@@ -466,9 +416,6 @@ function normalizeOrder(o) {
   return order;
 }
 
-/* The types OpenSea asks us to sign MUST be the canonical Seaport ones — if
- * they ever differ, our signature would hash to a different order than the
- * one we verified. Compare structurally before trusting the payload. */
 function typesMatch(t) {
   if (!t || typeof t !== 'object') return false;
   const norm = (arr) => (Array.isArray(arr) ? arr.map((f) => `${f && f.name}:${f && f.type}`).join(',') : null);
@@ -478,26 +425,12 @@ function typesMatch(t) {
   return true;
 }
 
-/* Decode the operator out of a setApprovalForAll(operator,bool) calldata. */
 function approvalOperator(data) {
   if (typeof data !== 'string' || !/^0xa22cb465/i.test(data) || data.length < 74) return null;
   const op = '0x' + data.slice(34, 74);
   return /^0x[a-fA-F0-9]{40}$/.test(op) ? op : null;
 }
 
-/* OpenSea /api/v2/listings/actions has two observed shapes:
- *
- * A) steps format (proto3 JSON, current — robinhood & new integrations):
- *    { steps: [
- *        { itemApprovalAction: { transaction: { to, data, ... } } },
- *        { createListingsAction: { signatureRequest: {
- *            message: "<JSON string of EIP-712 typed data>", ... } } } ] }
- *    The typed-data JSON is {types, primaryType, domain, message}; `message`
- *    holds the order value (proto JSON: uints as strings, defaults omitted).
- *
- * B) legacy flat format: an object containing the order by shape.
- *
- * Return { order, protocolAddress, operator, domain } or null. */
 function extractListingOrder(actions) {
   let order = null;
   let protocolAddress = null;
@@ -533,7 +466,6 @@ function extractListingOrder(actions) {
     }
   }
 
-  /* Legacy shape fallback: find the order by walking for offer+consideration. */
   if (!order) {
     const isOrder = (n) => n && typeof n === 'object' && Array.isArray(n.offer) && Array.isArray(n.consideration);
     const walk = (n) => {
@@ -550,8 +482,6 @@ function extractListingOrder(actions) {
   return order ? { order, protocolAddress, operator, domain } : null;
 }
 
-/* Plural variant: collect EVERY createListingsAction order from one actions
- * response (used by bulk listing — one multi-item /listings/actions call). */
 function extractListingOrders(actions) {
   const out = [];
   let protocolAddress = null;
@@ -592,25 +522,12 @@ function extractListingOrders(actions) {
   return out;
 }
 
-/* ---------- pre-sign verification (never sign blind) ---------- */
 
-/* Max total fees (platform + creator) in bps we accept on a listing order.
- * Anything above this refuses to sign — a fee this high is either a unit bug
- * or a hostile order. Configurable via settings.maxTotalFeeBps. */
 function maxTotalFeeBps() {
   const v = Number((store.readSettings() || {}).maxTotalFeeBps);
   return Number.isFinite(v) && v > 0 && v <= 5000 ? v : 2500;
 }
 
-/* The order we sign is OpenSea-built, so verify it actually IS a listing of our
- * token that pays us — before the signature exists:
- *  - offer side: exactly our token, correct id and quantity, nothing else
- *  - consideration: native ETH only; items sum EXACTLY to the sale price;
- *    exactly one item pays our wallet; total fees within the cap
- *  - times sane, counter matches on-chain getCounter() (real chain read),
- *    zone (if any) is a deployed contract (getCode), conduit operator is a
- *    deployed contract AND actually approved by our wallet on-chain
- * Any mismatch throws and nothing gets signed. */
 async function verifyListingOrder({ order, wallet, contract, tokenId, quantity, priceEth, proto, provider, operator, currency = ethers.ZeroAddress, decimals = 18 }) {
   const err = (m) => { throw new Error(`refusing to sign: ${m}`); };
   if (order.offer.length !== 1) err('order offers more than one item');
@@ -620,8 +537,6 @@ async function verifyListingOrder({ order, wallet, contract, tokenId, quantity, 
   if (off.identifierOrCriteria !== BigInt(tokenId)) err('offer token id mismatch');
   if (off.startAmount !== off.endAmount || off.startAmount !== BigInt(quantity)) err('offer quantity mismatch');
 
-  /* Some RH collections only list in a specific ERC20 (e.g. hoodwarrios →
-   * USDG). `currency` declares what the consideration must be paid in. */
   const cur = String(currency).toLowerCase();
   const isNative = cur === ethers.ZeroAddress.toLowerCase();
   const expectedTotal = ethers.parseUnits(String(priceEth), decimals) * BigInt(quantity);
@@ -663,9 +578,6 @@ async function verifyListingOrder({ order, wallet, contract, tokenId, quantity, 
   }
   if (order.conduitKey !== ethers.ZeroHash) {
     if (operator) {
-      /* Operator came from OpenSea's own approval action — verify it exists
-       * on-chain and that our wallet really approved it (else the listing
-       * would be unfillable, or worse, fillable by a surprise operator). */
       const code = await provider.getCode(operator);
       if (!code || code === '0x') err('conduit operator is not a deployed contract');
       const raw = await provider.call({ to: contract, data: ERC721.encodeFunctionData('isApprovedForAll', [wallet, operator]) });
@@ -677,8 +589,6 @@ async function verifyListingOrder({ order, wallet, contract, tokenId, quantity, 
   }
 }
 
-/* Seaport EIP-712 domain version: known addresses map directly; anything else
- * must identify itself on-chain via information() → (name, version). */
 const INFO_IFACE = new ethers.Interface(['function information() view returns (string name, string version)']);
 async function seaportVersion(proto, provider) {
   const lc = proto.toLowerCase();
@@ -692,11 +602,6 @@ async function seaportVersion(proto, provider) {
 }
 
 async function listNft(chainKey, walletId, contract, tokenId, priceEth, opts = {}) {
-  /* Some collections only accept listings in a specific ERC20 (seen on RH:
-   * hoodwarrios → USDG). Detect the currency up front from the collection's
-   * own listings so the first attempt already uses it; if detection misses,
-   * OpenSea names the required currency in the submit validation error —
-   * retry once with it. */
   let currency = String(opts.currency || ethers.ZeroAddress);
   if (currency.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
     const c0 = chainsMod.chain(chainKey);
@@ -761,15 +666,9 @@ async function listNftOnce(chainKey, walletId, contract, tokenId, priceEth, opts
   const order = built.order;
   if (order.offerer.toLowerCase() !== w.address.toLowerCase()) throw new Error('order offerer mismatch — not your wallet');
   const proto = built.protocolAddress || SEAPORT;
-  /* On-chain proof the protocol we're about to sign against exists here —
-   * catches payloads that omit the protocol address on non-ethereum chains. */
   const protoCode = await p.getCode(proto);
   if (!protoCode || protoCode === '0x') throw new Error(`Seaport protocol ${proto} not deployed on ${c.name}`);
 
-  /* Approval target comes from OpenSea's own payload when present (conduit
-   * operators differ per chain — robinhood's is NOT the ethereum one). Fall
-   * back to the canonical conduit, or to Seaport itself when the order has no
-   * conduit key (Seaport then transfers directly and needs the approval). */
   const opTarget = built.operator
     || (order.conduitKey === ethers.ZeroHash ? proto : CONDUIT);
   const ap = await ensureApproval(chainKey, walletId, contract, { operator: opTarget });
@@ -777,17 +676,12 @@ async function listNftOnce(chainKey, walletId, contract, tokenId, priceEth, opts
     await p.waitForTransaction(ap.hash, 1, 120000).catch(() => null);
   }
 
-  /* Verify the order is exactly a listing of our token that pays us, with
-   * fees in bounds and on-chain facts (counter, zone code, approval) checked
-   * — BEFORE any signature exists. Throws on any mismatch. */
   await verifyListingOrder({
     order, wallet: w.address, contract, tokenId,
     quantity: Number(opts.amount || 1), priceEth, proto, provider: p,
     operator: built.operator || null, currency, decimals,
   });
 
-  /* EIP-712 domain: prefer what OpenSea embedded in the sign request (it is
-   * the exact domain their order hash uses); validate it before trusting. */
   let version = null;
   if (built.domain && built.domain.verifyingContract
     && built.domain.verifyingContract.toLowerCase() === proto.toLowerCase()) {
@@ -823,15 +717,8 @@ async function listNftOnce(chainKey, walletId, contract, tokenId, priceEth, opts
   return { ok: true, orderHash: res?.order?.order_hash || null, price: priceEth, wallet: w.address, currency: currencySymbol ? currency : null, currencySymbol };
 }
 
-/* ---------------- bulk listing (many NFTs in seconds) ----------------
- * One currency detect, one multi-item actions call per wallet+contract group
- * (falls back to parallel single-item calls), approvals deduped & waited ONCE,
- * then sign everything locally and POST orders with bounded concurrency.
- * items: [{ walletId, contract, tokenId, price, standard?, amount? }] */
 async function listNftBulk(chainKey, items, opts = {}) {
   let res = await _listBulkOnce(chainKey, items, opts);
-  /* Same currency-retry safety net as single listNft: OpenSea names the
-   * required currency in the submit error when detection missed. */
   const cur = String(opts.currency || ethers.ZeroAddress);
   const bad = res.find((r) => r && r.error && /requires currency/.test(r.error));
   if (bad) {
@@ -862,7 +749,6 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
     if (li >= 0 && !idxOf.has(li)) idxOf.set(li, oi);
   });
 
-  /* 1. currency detect ONCE */
   let currency = String(opts.currency || ethers.ZeroAddress);
   if (currency.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
     let slug = opts.slug || null;
@@ -883,7 +769,6 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
   const startSec = Math.floor(Date.now() / 1000) - 60;
   const durSec = Number(opts.durationSec || (opts.durationDays ? opts.durationDays * 86400 : 30 * 86400));
 
-  /* 2. group by wallet+contract */
   const groups = {};
   list.forEach((it, i) => {
     const k = it.walletId + '|' + String(it.contract).toLowerCase();
@@ -916,13 +801,11 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
       })),
     });
 
-    /* 2a. one multi-item actions call; fall back to parallel singles */
     let built = []; // { idx, order, protocolAddress, operator, domain }
     try {
       const actions = await osFetch('/api/v2/listings/actions', { method: 'POST', body: actionBody(idxs.map((i) => list[i])) });
       const multi = extractListingOrders(actions);
       if (multi.length !== idxs.length) throw new Error(`multi-actions returned ${multi.length}/${idxs.length} orders`);
-      /* match orders back to items by offered tokenId */
       for (const b of multi) {
         const offId = String(b.order.offer?.[0]?.identifierOrCriteria ?? '');
         const i = idxs.find((x) => String(list[x].tokenId) === offId);
@@ -940,7 +823,6 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
       });
     }
 
-    /* 2b. approvals: dedupe per (contract, operator), fire, wait ONCE */
     const opSeen = new Set();
     const approvals = [];
     for (const b of built) {
@@ -965,7 +847,6 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
       await Promise.all(approvals.map((h) => p.waitForTransaction(h, 1, 120000).catch(() => null)));
     }
 
-    /* 2c. verify + sign everything in parallel */
     const signed = await Promise.all(built.map(async (b) => {
       const oi = idxOf.get(b.idx);
       if (b.error) { results[oi] = { tokenId: list[b.idx].tokenId, error: b.error }; return null; }
@@ -1008,7 +889,6 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
       }
     }));
 
-    /* 2d. POST orders with bounded concurrency */
     await poolMap(signed.filter(Boolean), POST_CONC, async (s) => {
       const oi = idxOf.get(s.idx);
       try {
@@ -1025,14 +905,7 @@ async function _listBulkOnce(chainKey, items, opts = {}) {
   return results;
 }
 
-/* ---------------- Seaport 1.6 cancel ---------------- */
 
-/* Cancels ONE live listing on-chain: fetch the order parameters from OpenSea
-   (best-listing endpoint), rebuild the Seaport OrderComponents, then call
-   Seaport.cancel() from the seller's wallet. The order payload from OS v2 is
-   {order_hash, protocol_data:{parameters, signature}} — parameters already
-   match OrderComponents keys. Cancelling on-chain beats any API cancel: it is
-   final and indexers confirm it from logs. */
 function orderToComponents(p) {
   return {
     offerer: p.offerer,
@@ -1079,9 +952,6 @@ async function cancelListing(chainKey, walletId, contract, tokenId, opts = {}) {
   });
   const res = await rpc.broadcast(chainKey, raw, urls);
   store.appendLog('nft-ops.log', `cancel ${c.key} ${contract}#${tokenId} ${res.hash} by ${w.address}`);
-  /* opts.wait: hold until the cancel is mined. Relisting depends on this —
-   * if the cancel reverts, the old order stays live and must not be papered
-   * over by a fresh listing at a different price. */
   let confirmed = null;
   if (opts.wait) {
     const deadline = Date.now() + Number(opts.waitMs || 90000);
@@ -1099,10 +969,6 @@ async function cancelListing(chainKey, walletId, contract, tokenId, opts = {}) {
   return { ok: true, hash: res.hash, orderHash: order.order_hash || null, confirmed };
 }
 
-/* Cancel MANY live listings in parallel: fetch best-listing per token (x6),
- * verify offerer, group by wallet, pipeline nonces, broadcast back-to-back,
- * then wait for all receipts at once. Returns per-item results in input order.
- * items: [{ walletId, contract, tokenId }] */
 async function cancelBatch(chainKey, items, opts = {}) {
   const c = chainsMod.chain(chainKey);
   if (!c.osSlug) throw new Error(`OpenSea not on ${c.name}`);
@@ -1113,7 +979,6 @@ async function cancelBatch(chainKey, items, opts = {}) {
   if (!valid.length) return out;
   const origIdx = valid.map((v) => (items || []).findIndex((it) => it && it.walletId === v.walletId && String(it.tokenId) === String(v.tokenId) && String(it.contract).toLowerCase() === String(v.contract).toLowerCase()));
 
-  /* 1. fetch best listing per token in parallel */
   const fetched = await poolMap(valid.map((_, i) => i), 6, async (i) => {
     const it = valid[i];
     try {
@@ -1125,7 +990,6 @@ async function cancelBatch(chainKey, items, opts = {}) {
     } catch (e) { return { i, error: String(e.message).slice(0, 100) }; }
   });
 
-  /* 2. group by wallet */
   const byWallet = {};
   for (const f of fetched) {
     const oi = origIdx[f.i];
@@ -1138,7 +1002,6 @@ async function cancelBatch(chainKey, items, opts = {}) {
     (byWallet[valid[f.i].walletId] = byWallet[valid[f.i].walletId] || []).push(f);
   }
 
-  /* 3. per wallet: pipeline cancel txs, broadcast all, then wait for all */
   await poolMap(Object.entries(byWallet), 6, async ([id, list]) => {
     const w = wallets.getWallet('evm', id);
     const urls = rpc.urlsFor(chainKey);
@@ -1185,7 +1048,6 @@ async function cancelBatch(chainKey, items, opts = {}) {
   return out;
 }
 
-/* ---------------- floor war auto-relist ---------------- */
 
 function countDecimals(x) {
   const s = String(x);
@@ -1212,20 +1074,12 @@ async function collectionFloor(chainKey, slug) {
   return Number(ethers.formatUnits(String(cur.value), cur.decimals ?? 18));
 }
 
-/* Known symbol → per-chain addresses, so detection doesn't need an extra OS
- * call to resolve the token some collections demand (RH: hoodwarrios → USDG). */
 const KNOWN_CURRENCY = {
   usdg: { robinhood: '0x5fc5360d0400a0fd4f2af552add042d716f1d168' },
   weth: { robinhood: '0x0bd7d308f8e1639fab988df18a8011f41eacad73' },
 };
 const currencyCache = new Map(); /* chain:slug -> { currency, symbol, decimals, native, at } */
 
-/* Which currency does this collection list in? OS's best listing names the
- * symbol + decimals; the symbol is resolved to an address (known map, else
- * the collection's own offers carry it) so listings/actions can target it on
- * the FIRST attempt. Some RH collections reject anything else at submit time.
- * Returns null when undeterminable — callers fall back to native + the
- * submit-error retry in listNft. */
 async function collectionListingCurrency(chainKey, slug) {
   if (!slug) return null;
   const ck = `${chainKey}:${String(slug).toLowerCase()}`;
@@ -1293,19 +1147,7 @@ function startFloorWar(cfg) {
 function stopFloorWar(id) { const s = floorWars.get(id); if (!s) return false; s.running = false; return true; }
 function listFloorWars() { return [...floorWars.values()].map((s) => ({ id: s.id, running: s.running, slug: s.cfg.slug, tokenId: s.cfg.tokenId, myPrice: s.cfg.myPrice, lastFloor: s.lastFloor, relists: s.relists, log: s.log.slice(-30) })); }
 
-/* ---------------- accept WETH offers ---------------- */
 
-/* Only these Seaport entrypoints will ever be executed for offer acceptance.
- * With the conduit approval live, unverified calldata could drain the
- * wallet's NFTs — so anything else is refused outright.
- *
- * Tuples are the EXACT Seaport 1.6 ABI (ProjectOpenSea/seaport-types). Verified
- * against the official @opensea/seaport-js artifact: selectors
- * fulfillBasicOrder=0xfb0f3ee1, fulfillBasicOrder_efficient_6GL6yc=0x00000000
- * (vanity-mined), fulfillOrder=0xb3a34c4c, fulfillAdvancedOrder=0xe7acab24.
- * NOTE the 1.6 layout differs from 1.5: BasicOrderParameters carries
- * basicOrderType right after offerAmount and ends with `bytes signature`, and
- * fulfillOrder takes an Order (parameters+signature), not bare parameters. */
 const ADDL_RECIPIENT_TUPLE = '(uint256 amount,address recipient)';
 const BASIC_ORDER_TUPLE = `(address considerationToken,uint256 considerationIdentifier,uint256 considerationAmount,address offerer,address zone,address offerToken,uint256 offerIdentifier,uint256 offerAmount,uint8 basicOrderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 offererConduitKey,bytes32 fulfillerConduitKey,uint256 totalOriginalAdditionalRecipients,${ADDL_RECIPIENT_TUPLE}[] additionalRecipients,bytes signature)`;
 const OFFER_ITEM_TUPLE = '(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)';
@@ -1319,25 +1161,11 @@ const FULFILL_IFACE = new ethers.Interface([
   `function fulfillBasicOrder_efficient_6GL6yc(${BASIC_ORDER_TUPLE} parameters)`,
   `function fulfillOrder(${ORDER_TUPLE} order,bytes32 fulfillerConduitKey)`,
   `function fulfillAdvancedOrder(${ADVANCED_ORDER_TUPLE} advancedOrder,${CRITERIA_RESOLVER_TUPLE}[] criteriaResolvers,bytes32 fulfillerConduitKey,address recipient)`,
-  /* Seaport 1.6 batch entrypoints — OpenSea uses fulfillAvailableAdvancedOrders
-   * for multi-item offer accepts (the order is duplicated per item, each copy
-   * carrying its own 1/N fraction and its own zone-signed extraData). The two
-   * (uint256,uint256)[][] params are the 1.6 fulfillment-component arrays. */
   `function fulfillAvailableAdvancedOrders(${ADVANCED_ORDER_TUPLE}[] advancedOrders,${CRITERIA_RESOLVER_TUPLE}[] criteriaResolvers,(uint256,uint256)[][] orderComponents,(uint256,uint256)[][] considerationComponents,bytes32 fulfillerConduitKey,address recipient,uint256 maximumFulfilled)`,
   `function fulfillAvailableOrders(${ORDER_TUPLE}[] orders,${CRITERIA_RESOLVER_TUPLE}[] criteriaResolvers,(uint256,uint256)[][] orderComponents,(uint256,uint256)[][] considerationComponents,bytes32 fulfillerConduitKey,address recipient,uint256 maximumFulfilled)`,
-  /* Seaport match route — OpenSea serves matchAdvancedOrders for collection
-   * OFFER accepts on Robinhood: orders[0] = the bid (zone-restricted, carries
-   * the zone-signed extraData), orders[1] = an OS-synthesized counter order
-   * "from" the seller (signature 0x — valid because the seller IS the caller);
-   * fulfillments route payment/fees/NFT. Selector 0xf2d12b12 verified present
-   * in RH Seaport bytecode; real RH fills use it (observed in fill sample). */
   `function matchAdvancedOrders(${ADVANCED_ORDER_TUPLE}[] advancedOrders,${CRITERIA_RESOLVER_TUPLE}[] criteriaResolvers,((uint256 orderIndex,uint256 itemIndex)[] offerComponents,(uint256 orderIndex,uint256 itemIndex)[] considerationComponents)[] fulfillments,address recipient)`,
 ]);
 
-/* Resolve the operator that moves tokens for a Seaport conduit key. Standard
- * Seaport derives it via getConduit(); Robinhood's fork strips that view
- * function entirely, so chains may declare a known conduit in config as a
- * fallback. Returns null when the operator cannot be determined. */
 async function resolveConduit(proto, conduitKey, provider, chainCfg) {
   if (!conduitKey || conduitKey === ethers.ZeroHash) return proto;
   try {
@@ -1349,31 +1177,20 @@ async function resolveConduit(proto, conduitKey, provider, chainCfg) {
   return null;
 }
 
-/* Extract the embedded order from fulfill calldata. Returns null when the
- * selector is not one of the known fulfill functions. */
 function decodeFulfillCalldata(data) {
   try {
     const parsed = FULFILL_IFACE.parseTransaction({ data });
     if (!parsed) return null;
     if (parsed.name === 'fulfillBasicOrder' || parsed.name === 'fulfillBasicOrder_efficient_6GL6yc') {
-      /* basic route: offer* fields = the order's OFFER item (buyer's WETH,
-       * we receive it); consideration* = our NFT (we give it);
-       * additionalRecipients = fees carved out of what we receive. */
       const b = parsed.args[0];
       return {
         kind: 'basic', name: parsed.name, offerer: b.offerer,
         giveToken: b.considerationToken, giveId: BigInt(b.considerationIdentifier), giveAmount: BigInt(b.considerationAmount),
         getToken: b.offerToken, getId: BigInt(b.offerIdentifier), getAmount: BigInt(b.offerAmount),
-        /* which conduit the fulfiller asked for — decides which operator pulls
-         * OUR NFT, so it is also the only correct approval target */
         fulfillerConduitKey: b.fulfillerConduitKey,
         feeItems: [...b.additionalRecipients].map((r) => ({ amount: BigInt(r.amount), recipient: r.recipient })),
       };
     }
-    /* Batch entrypoints: args[0] is an ARRAY of orders. OpenSea duplicates the
-     * same order once per item being sold, each copy with its own fraction and
-     * zone-signed extraData. Sum the fractions so downstream math (payment,
-     * fees, expectedPrice) reflects the whole batch. */
     if (parsed.name === 'fulfillAvailableAdvancedOrders' || parsed.name === 'fulfillAvailableOrders') {
       const orders = [...parsed.args[0]];
       if (!orders.length) return null;
@@ -1404,11 +1221,6 @@ function decodeFulfillCalldata(data) {
         criteriaResolvers: [...(parsed.args[1] || [])].map((r) => ({ orderIndex: Number(r.orderIndex), side: Number(r.side), index: Number(r.index), identifier: BigInt(r.identifier) })),
       };
     }
-    /* Match route (collection OFFER accepts on Robinhood): the bid is one of
-     * the matched orders — identify it as the order paying entirely in ERC20,
-     * and normalize it to the same shape the fulfill paths produce so the
-     * downstream math (payment, fees, funding guard, preview) is shared. The
-     * other order(s) ride along in `otherOrders` for match-specific checks. */
     if (parsed.name === 'matchAdvancedOrders') {
       const orders = [...parsed.args[0]];
       if (!orders.length) return null;
@@ -1431,8 +1243,6 @@ function decodeFulfillCalldata(data) {
         fulfillerConduitKey: null, /* match has none — operator comes from the counter order */
       };
     }
-    /* fulfillOrder → args[0] is Order {parameters, signature};
-     * fulfillAdvancedOrder → args[0] is AdvancedOrder {parameters, ...}. */
     const params = parsed.args[0].parameters;
     const norm = (xs) => [...xs].map((x) => ({
       itemType: Number(x.itemType), token: x.token, id: BigInt(x.identifierOrCriteria),
@@ -1442,10 +1252,6 @@ function decodeFulfillCalldata(data) {
       kind: 'full', name: parsed.name, offerer: params.offerer,
       fulfillerConduitKey: parsed.name === 'fulfillAdvancedOrder' ? parsed.args[2] : parsed.args[1],
       offer: norm(params.offer), consideration: norm(params.consideration),
-      /* Partial fill fraction for multi-item (collection) offers. Selling one
-       * NFT into a 14-item order arrives as numerator=1, denominator=14 —
-       * payment and fees must be scaled by it or the preview shows the whole
-       * order's value instead of this fill's. */
       numerator: parsed.name === 'fulfillAdvancedOrder' ? BigInt(parsed.args[0].numerator) : 1n,
       denominator: parsed.name === 'fulfillAdvancedOrder' ? BigInt(parsed.args[0].denominator) : 1n,
       criteriaResolvers: parsed.name === 'fulfillAdvancedOrder'
@@ -1455,8 +1261,6 @@ function decodeFulfillCalldata(data) {
   } catch { return null; }
 }
 
-/* Small async pool — funding checks fan out per offer but must not hammer the
- * RPC with 20 parallel calls. */
 async function poolMap(items, limit, fn) {
   const out = new Array(items.length);
   let i = 0;
@@ -1470,12 +1274,6 @@ async function poolMap(items, limit, fn) {
   return out;
 }
 
-/* Funding check for one offer: the maker must hold AND have approved at least
- * one item's worth of the payment token — Seaport pulls it from their wallet
- * at fill time, so an unfunded offer just reverts and burns the seller's gas.
- * Returns { checked, funded, payableItems }; payableItems = how many items the
- * maker can still pay for at the per-item price. RPC read errors return
- * checked:false and the caller fails open (accept-time guard still protects). */
 async function checkOfferFunding(offer, provider, chainCfg) {
   try {
     const p = offer.raw?.protocol_data?.parameters;
@@ -1486,9 +1284,6 @@ async function checkOfferFunding(offer, provider, chainCfg) {
     const qty = BigInt(Math.max(1, Number(offer.quantity) || 1));
     const perItemRaw = BigInt(payItem.startAmount) / qty;
     if (perItemRaw === 0n) return { checked: false };
-    /* Who pulls the maker's payment: the order's own conduit, else Seaport.
-     * Unresolvable puller (stripped getConduit, no chain override) → fall
-     * back to balance-only check instead of a false "unfunded". */
     let puller = proto;
     const conduitKey = p.conduitKey;
     if (conduitKey && conduitKey !== ethers.ZeroHash) {
@@ -1513,9 +1308,6 @@ async function checkOfferFunding(offer, provider, chainCfg) {
 async function bestOffers(chainKey, slug, opts = {}) {
   const d = await osFetch(`/api/v2/offers/collection/${slug}?limit=${opts.limit || 20}`);
   const list = (d.offers || []).map((o) => {
-    /* Prefer OpenSea's normalized price (correct currency + decimals for the
-     * chain). Parsing offer items directly assumes WETH/18 decimals, which is
-     * wrong on other chains — only a last resort. */
     let price = null;
     if (o.price?.current?.value != null) {
       price = Number(ethers.formatUnits(String(o.price.current.value), o.price.current.decimals ?? 18));
@@ -1525,13 +1317,7 @@ async function bestOffers(chainKey, slug, opts = {}) {
     }
     const cons = o.protocol_data?.parameters?.consideration || [];
     const payItem = (o.protocol_data?.parameters?.offer || []).find((x) => Number(x.itemType) === 1);
-    /* Quantity = how many NFTs the buyer wants. ONLY NFT-type consideration
-     * items count (2=ERC721, 3=ERC1155, 4/5=criteria variants). Summing every
-     * item drags in the ERC20 fee item whose amount is in wei — that produced
-     * phantom quantities like 14,000,000,000,014 for a 14-item offer. */
     const quantity = cons.reduce((a, x) => ([2, 3, 4, 5].includes(Number(x.itemType)) ? a + Number(x.startAmount || 0) : a), 0);
-    /* OpenSea's normalized price is the order TOTAL for multi-item offers.
-     * Normalize to per-item so floor-diff and checkout show real numbers. */
     const perItem = quantity > 1 && price != null ? price / quantity : price;
     return {
       orderHash: o.order_hash,
@@ -1547,10 +1333,6 @@ async function bestOffers(chainKey, slug, opts = {}) {
     };
   });
 
-  /* FUNDED-ONLY FILTER. Unfunded offers (maker holds/approves less than one
-   * item's payment) can never be accepted — they just clutter the grid and
-   * tempt gas-burning accepts. Check balance+allowance per offer in parallel;
-   * unreadable checks fail open (the accept-time guard is the backstop). */
   if (list.length) {
     const c = chainsMod.chain(chainKey);
     const urls = rpc.urlsFor(chainKey);
@@ -1566,18 +1348,12 @@ async function bestOffers(chainKey, slug, opts = {}) {
   return visible.sort((a, b) => (b.price || 0) - (a.price || 0));
 }
 
-/* Shared read-only preparation for accepting an offer: fetch the stored order,
- * fetch + decode the fulfillment calldata, run every safety check, derive the
- * approval operator. Used by BOTH the preview (checkout display) and the real
- * accept, so the numbers shown are exactly the numbers that get signed. */
 async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
   const c = chainsMod.chain(chainKey);
   const w = wallets.getWallet('evm', walletId);
   if (!w) throw new Error('wallet not found');
   const proto = opts.protocolAddress || SEAPORT;
 
-  /* 1) Independently fetch the stored order by hash — the reference we verify
-   * the fulfillment calldata against. */
   const od = await osFetch(`/api/v2/orders/chain/${c.osSlug}/protocol/${proto}/${orderHash}`);
   const fo = od?.order || od;
   const foParams = fo?.protocol_data?.parameters;
@@ -1592,7 +1368,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
   const urls = rpc.urlsFor(chainKey);
   const p = rpc.provider(urls[0], c.id);
 
-  /* 2) Fulfillment calldata from OpenSea. */
   const d = await osFetch(`/api/v2/offers/fulfillment_data`, {
     method: 'POST',
     body: JSON.stringify({
@@ -1612,19 +1387,12 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
     throw new Error(`cannot build calldata (fn=${String(tx.function || '?').split('(')[0]}, keys=${tx.input_data ? Object.keys(tx.input_data).join(',') : 'no input_data'})`);
   }
 
-  /* 3) Hard safety checks BEFORE anything is signed:
-   * - accepting an offer receives payment — it must never send ETH value;
-   * - the calldata target must be exactly the Seaport protocol contract and
-   *   actually deployed on-chain (with the conduit approval live, a hostile
-   *   `to` could drain the wallet's NFTs). */
   if (BigInt(tx.value || 0) !== 0n) throw new Error('refusing: accepting an offer must not send ETH value');
   const to = String(tx.to || '');
   if (to.toLowerCase() !== proto.toLowerCase()) throw new Error(`refusing: calldata target ${to} is not the Seaport protocol ${proto}`);
   const pcode = await p.getCode(to);
   if (!pcode || pcode === '0x') throw new Error('refusing: protocol address has no code on-chain');
 
-  /* 4) Decode the calldata (known fulfill selectors only) and cross-check the
-   * embedded order against the stored order fetched in step 1. */
   const dec = decodeFulfillCalldata(data);
   if (!dec) throw new Error('refusing: calldata is not a known Seaport fulfill function');
   if (dec.offerer.toLowerCase() !== String(foParams.offerer || '').toLowerCase()) throw new Error('refusing: embedded offerer differs from stored order');
@@ -1632,8 +1400,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
 
   let receiveAmount;
   if (dec.kind === 'basic') {
-    /* basic route: offer* = what the buyer pays (we receive it),
-     * consideration* = our NFT (we give it), additionalRecipients = fees. */
     const pay = foOffer[0];
     if (dec.getToken.toLowerCase() !== pay.token) throw new Error('refusing: payment token differs from stored order');
     if (dec.getAmount !== pay.startAmount) throw new Error('refusing: payment amount differs from stored order');
@@ -1646,10 +1412,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
       throw new Error(`refusing: offer fees ${(Number((feeSum * 10000n) / receiveAmount) / 100).toFixed(2)}% exceed ${capBps / 100}% cap`);
     }
   } else if (dec.kind === 'match') {
-    /* Match route: OpenSea matches the bid against a synthetic counter order
-     * it builds from the seller's acceptance. Verify the bid copy against the
-     * stored order, then verify the counter order is EXACTLY "we give this one
-     * NFT, we receive the bid's net amount" — nothing more can move. */
     if (dec.offer.length !== foOffer.length) throw new Error('refusing: match bid offer item count differs from stored order');
     for (let i = 0; i < foOffer.length; i++) {
       const a = dec.offer[i]; const b = foOffer[i];
@@ -1661,7 +1423,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
       const nftItem = dec.consideration.find((x) => ([2, 3, 4, 5].includes(x.itemType)) && x.token.toLowerCase() === String(opts.contract).toLowerCase());
       if (!nftItem) throw new Error('refusing: match bid has no consideration item for the expected NFT contract');
     }
-    /* The criteria resolver must aim the bid at exactly the token we're selling. */
     if (opts.tokenId != null) {
       const aimed = dec.criteriaResolvers.some((r) => r.orderIndex === dec.bidIndex && r.side === 1 && r.identifier === BigInt(opts.tokenId));
       if (!aimed) throw new Error('refusing: match calldata does not resolve the bid to the expected token id');
@@ -1674,8 +1435,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
     if (feeSum * 10000n > receiveAmount * BigInt(capBps)) {
       throw new Error(`refusing: offer fees ${(Number((feeSum * 10000n) / receiveAmount) / 100).toFixed(2)}% exceed ${capBps / 100}% cap`);
     }
-    /* Payment routing: recipient must be the selling wallet, and the counter
-     * order (offerer = us) must offer exactly our NFT and be paid the net. */
     if (String(dec.recipient).toLowerCase() !== w.address.toLowerCase()) {
       throw new Error(`refusing: match recipient ${dec.recipient} is not the selling wallet`);
     }
@@ -1697,8 +1456,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
     const net = receiveAmount - feeSum;
     if (ctrSum * 100n < net * 99n) throw new Error('refusing: counter order pays less than the bid net amount');
     if (ctrPay.some((x) => String(x.recipient).toLowerCase() !== w.address.toLowerCase())) throw new Error('refusing: counter order payment does not go to the selling wallet');
-    /* Who pulls our NFT: the counter order's own conduit key (Seaport moves
-     * offer items via the order's conduit in match). */
     dec.counterConduitKey = ctr.conduitKey;
   } else {
     if (dec.offer.length !== foOffer.length) throw new Error('refusing: offer item count differs from stored order');
@@ -1708,8 +1465,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
         throw new Error(`refusing: offer item ${i} differs from stored order`);
       }
     }
-    /* Batch fills duplicate the order once per item — every copy must match
-     * the stored order, not just the first one. */
     if (dec.allParams) {
       for (let k = 1; k < dec.allParams.length; k++) {
         const prm = dec.allParams[k];
@@ -1723,19 +1478,9 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
       }
     }
     if (opts.contract) {
-      /* 2=ERC721, 3=ERC1155, 4/5=criteria (wildcard/merkle) variants —
-       * collection offers use 4, so all four count here. */
       const nftItem = dec.consideration.find((x) => ([2, 3, 4, 5].includes(x.itemType)) && x.token.toLowerCase() === String(opts.contract).toLowerCase());
       if (!nftItem) throw new Error('refusing: no consideration item for the expected NFT contract');
-      /* criteria offers carry a merkle root instead of the id — only enforce
-       * the id when an item actually names it */
       if (opts.tokenId != null) {
-        /* id=0 is a WILDCARD criteria (any token in the collection) — it must
-         * NOT be compared against the requested tokenId; a merkle root
-         * (id >= 2^200) can't be compared either. For both, the criteria
-         * resolver inside the calldata is what actually picks the token, so
-         * verify THAT aims at our tokenId instead. Only a real explicit id
-         * (0 < id < 2^200) is compared directly. */
         const explicitId = nftItem.id > 0n && nftItem.id < (BigInt(1) << 200n);
         if (explicitId) {
           if (nftItem.id !== BigInt(opts.tokenId)) {
@@ -1747,8 +1492,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
         }
       }
     }
-    /* Scale by the fill fraction: selling 1 item into a 14-item order pays
-     * 1/14 of the order's WETH total, not the whole thing. */
     const fillNum = dec.numerator ?? 1n;
     const fillDen = (dec.denominator ?? 1n) || 1n;
     receiveAmount = dec.offer[0].startAmount * fillNum / fillDen;
@@ -1759,7 +1502,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
     }
   }
 
-  /* 5) The UI passes the price it displayed — the order must actually pay it. */
   if (opts.expectedPrice != null && opts.expectedPrice !== '') {
     const exp = ethers.parseUnits(String(opts.expectedPrice), 18);
     if (receiveAmount * 100n < exp * 99n) {
@@ -1767,11 +1509,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
     }
   }
 
-  /* 6) Maker funding check. Seaport pulls the payment from the maker's wallet
-   * at fill time — an unfunded or unapproved offer REVERTS and burns the
-   * seller's gas. Verify balance and allowance of this fill's payment before
-   * anything is signed. Read errors are non-fatal (we only block on a
-   * definitive shortfall). */
   {
     const payTokenAddr = dec.kind === 'basic' ? dec.getToken : dec.offer[0].token;
     const fmtU = (v) => { try { return ethers.formatUnits(v, 18); } catch { return String(v); } };
@@ -1782,10 +1519,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
     if (bal != null && bal < receiveAmount) {
       throw new Error(`maker cannot pay: holds ${fmtU(bal)} but this fill needs ${fmtU(receiveAmount)} — offer is unfunded, accepting would just burn gas`);
     }
-    /* Allowance goes to whatever operator moves the maker's payment: the
-     * order's own conduit, or Seaport directly when it has no conduit. When
-     * the puller can't be determined (fork without getConduit and no chain
-     * override), skip the allowance check — balance check still applies. */
     try {
       let puller = null;
       const orderConduit = foParams.conduitKey;
@@ -1802,19 +1535,11 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
       }
     } catch (e) {
       if (/maker has not approved/.test(String(e.message))) throw e;
-      /* allowance unreadable — don't block on it */
     }
   }
 
-  /* The operator that pulls our NFT out of the wallet is chosen by the
-   * fulfillment calldata itself (fulfillerConduitKey), and it differs per
-   * chain — approving ethereum's conduit on another chain makes the fulfill
-   * revert. Derive the exact operator on-chain: no conduit -> Seaport pulls
-   * directly (approve the protocol), otherwise Seaport.getConduit(key). */
   let fulfillOperator = proto;
   if (dec.kind === 'match') {
-    /* Match route: our NFT leaves via the counter order's offer items, which
-     * Seaport moves through that order's own conduit. Approve that operator. */
     if (dec.counterConduitKey && dec.counterConduitKey !== ethers.ZeroHash) {
       const conduit = await resolveConduit(proto, dec.counterConduitKey, p, c);
       if (!conduit) {
@@ -1823,7 +1548,6 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
       fulfillOperator = conduit;
     }
   } else if (dec.fulfillerConduitKey && dec.fulfillerConduitKey !== ethers.ZeroHash) {
-    /* resolveConduit handles forks without getConduit() via chain config. */
     const conduit = await resolveConduit(proto, dec.fulfillerConduitKey, p, c);
     if (!conduit) {
       throw new Error(`refusing: no open conduit for key ${String(dec.fulfillerConduitKey).slice(0, 14)}… on ${c.name} — approval target unclear`);
@@ -1840,8 +1564,6 @@ const ERC20_IFACE = new ethers.Interface([
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)',
 ]);
-/* Best-effort ERC20 metadata. Some tokens return bytes32 symbols — the decode
- * is wrapped, so worst case we fall back to WETH/18 (the common offer token). */
 async function tokenInfo(chainKey, address) {
   try {
     const c = chainsMod.chain(chainKey);
@@ -1858,14 +1580,9 @@ async function tokenInfo(chainKey, address) {
   } catch { return { symbol: null, decimals: 18 }; }
 }
 
-/* OpenSea-style checkout preview: runs every verification the real accept
- * does, then returns the exact fee split and net proceeds for display. No
- * signing, no approval, no broadcast. */
 async function previewOfferAccept(chainKey, walletId, orderHash, opts = {}) {
   const prep = await _prepareAccept(chainKey, walletId, orderHash, opts);
   const { dec, receiveAmount, foParams } = prep;
-  /* Fees scaled by the same fill fraction as receiveAmount, so the checkout
-   * shows exactly what THIS fill pays (1/14 of a 14-item order, not all). */
   const fillNum = dec.numerator ?? 1n;
   const fillDen = (dec.denominator ?? 1n) || 1n;
   const feeItems = dec.kind === 'basic'
@@ -1902,9 +1619,6 @@ async function acceptOffer(chainKey, walletId, orderHash, opts = {}) {
   const prep = await _prepareAccept(chainKey, walletId, orderHash, opts);
   const { c, w, p, urls, to, data } = prep;
   const appr = await ensureApproval(chainKey, walletId, opts.contract, { operator: prep.fulfillOperator });
-  /* If we just broadcast the approval, wait for it to land before estimating
-   * the fill — otherwise estimateGas reverts (no approval yet) and the fill
-   * flies on a blind fallback gas limit. RH blocks are ~1/s-fast. */
   if (appr.waiting && opts.contract) {
     for (let i = 0; i < 25; i++) {
       try {
@@ -1930,24 +1644,13 @@ async function acceptOffer(chainKey, walletId, orderHash, opts = {}) {
   return { hash: res.hash, wallet: w.address };
 }
 
-/* BULK offer accept: many offers (possibly across multiple wallets) in ONE call.
- * Same per-offer safety checks as acceptOffer (_prepareAccept), but:
- *  - all offers prepared in PARALLEL (OpenSea fetches + safety checks)
- *  - approvals deduplicated per (wallet, contract, operator), waited once
- *  - fills signed with pipelined sequential nonces, broadcast in PARALLEL
- *  - NO waiting between offers — the whole batch flies in ~one round trip time.
- * Items: [{ walletId, orderHash, contract?, tokenId?, protocolAddress?, expectedPrice? }]
- * Result per item: { orderHash, tokenId, wallet, hash, gross, net, symbol }
- *               or { orderHash, tokenId, wallet, error }. */
 async function acceptOffersBulk(chainKey, items, opts = {}) {
   if (!Array.isArray(items) || !items.length) throw new Error('no offers given');
   const c = chainsMod.chain(chainKey);
 
-  /* 1) Prepare every offer in parallel — full safety checks, read-only. */
   const preps = await poolMap(items, 3, async (it) => {
     try {
       const prep = await _prepareAccept(chainKey, it.walletId, it.orderHash, { ...opts, ...it });
-      /* net proceeds for reporting (same math as previewOfferAccept) */
       const fillNum = prep.dec.numerator ?? 1n;
       const fillDen = (prep.dec.denominator ?? 1n) || 1n;
       const feeItems = prep.dec.kind === 'basic'
@@ -1963,7 +1666,6 @@ async function acceptOffersBulk(chainKey, items, opts = {}) {
   const ok = preps.filter((x) => x.prep);
   if (!ok.length) return out;
 
-  /* 2) Approvals: dedupe per (wallet, contract, operator); ensure once each. */
   const apprSeen = new Map();
   for (const { it, prep } of ok) {
     if (!it.contract) continue;
@@ -1976,7 +1678,6 @@ async function acceptOffersBulk(chainKey, items, opts = {}) {
       const appr = await ensureApproval(chainKey, a.walletId, a.contract, { operator: a.operator });
       if (appr.waiting) waiting.push(a);
     } catch (e) {
-      /* approval failed — every fill for this (wallet,contract) will revert; fail them now */
       for (const x of ok) {
         if (x.it.walletId === a.walletId && String(x.it.contract || '').toLowerCase() === String(a.contract).toLowerCase() && !x.dead) {
           x.dead = true;
@@ -1988,7 +1689,6 @@ async function acceptOffersBulk(chainKey, items, opts = {}) {
   const alive = ok.filter((x) => !x.dead);
   if (!alive.length) return out;
 
-  /* 3) Wait for fresh approvals to land (parallel poll), else estimateGas reverts. */
   if (waiting.length) {
     const p = rpc.provider(rpc.urlsFor(chainKey)[0], c.id);
     for (let i = 0; i < 25 && waiting.length; i++) {
@@ -2004,9 +1704,7 @@ async function acceptOffersBulk(chainKey, items, opts = {}) {
     }
   }
 
-  /* 4) Per wallet: fee once, nonce once, estimate in parallel, sign+broadcast all. */
   const fee = await wallets.feeData(chainKey);
-  /* payment-token decimals+symbol (deduped) so gross/net report real units */
   const payTokens = [...new Set(alive.map((x) => (x.prep.dec.kind === 'basic' ? x.prep.dec.getToken : x.prep.dec.offer[0].token)))];
   const decByToken = {};
   const symByToken = {};
@@ -2020,7 +1718,6 @@ async function acceptOffersBulk(chainKey, items, opts = {}) {
     const w = wallets.getWallet('evm', walletId);
     const p = rpc.provider(rpc.urlsFor(chainKey)[0], c.id);
     const urls = rpc.urlsFor(chainKey);
-    /* gas estimates in parallel (approvals are live by now) */
     await Promise.all(group.map(async (x) => {
       try { x.gasLimit = (await p.estimateGas({ from: w.address, to: x.prep.to, data: x.prep.data, value: 0n })) * 13n / 10n; }
       catch { x.gasLimit = 400000n; }
@@ -2048,10 +1745,6 @@ async function acceptOffersBulk(chainKey, items, opts = {}) {
 }
 
 function encodeFromInputData(tx) {
-  /* OpenSea returns {function: "<nameless signature>", input_data: {named args}}.
-   * The signature carries NO parameter names, so ethers cannot map input_data
-   * by name — encode the known entrypoints positionally against the canonical
-   * ABI (FULFILL_IFACE, selectors verified on-chain). */
   try {
     const sigName = String(tx.function || '').split('(')[0];
     const inp = tx.input_data || {};
@@ -2112,7 +1805,6 @@ function encodeFromInputData(tx) {
       if (!order || conduitKey === undefined) return null;
       return FULFILL_IFACE.encodeFunctionData('fulfillOrder', [[advArr(order)[0], order.signature || '0x'], conduitKey]);
     }
-    /* Unknown entrypoint: last-ditch positional encode from JSON key order. */
     const iface = new ethers.Interface([`function ${tx.function}`]);
     const frag = iface.getFunction(sigName);
     let args = frag.inputs.map((i) => inp[i.name]);
@@ -2125,7 +1817,6 @@ function encodeFromInputData(tx) {
   } catch { return null; }
 }
 
-/* ---------------- PnL ---------------- */
 
 async function pnl(chainKey, addresses, opts = {}) {
   const c = chainsMod.chain(chainKey);
@@ -2133,9 +1824,6 @@ async function pnl(chainKey, addresses, opts = {}) {
   const ethUsd = fx.ethUsd;
 
   const rows = [];
-  /* Primary mints come from the local activity log, not OpenSea. A mint that
-   * was never resold has no sale event, so without this the mint price and gas
-   * are invisible and every held mint looks like pure profit. */
   const activity = require('./activity');
   const mintSpend = {};   // "address|slug" -> { spent, gas, qty }
   for (const it of activity.list(300)) {
@@ -2166,7 +1854,6 @@ async function pnl(chainKey, addresses, opts = {}) {
       next = d.next || null;
     } while (next && ++pages < (opts.maxPages || 4));
 
-    // holdings valued at floor
     const inv = await inventory(chainKey, [a], { maxPages: 3 }).catch(() => []);
     const bySlug = {};
     for (const n of inv) { bySlug[n.collection] = (bySlug[n.collection] || 0) + 1; }
@@ -2177,8 +1864,6 @@ async function pnl(chainKey, addresses, opts = {}) {
       per[slug].floor = fp;
       per[slug].holdValue = fp != null ? fp * count : null;
     }
-    /* Fold mint cost in. Keyed per wallet+collection, so a mint on one wallet
-     * never lands on another's row. */
     for (const [k, m] of Object.entries(mintSpend)) {
       const [addr, slug] = k.split('|');
       if (addr !== a.toLowerCase()) continue;
@@ -2189,8 +1874,6 @@ async function pnl(chainKey, addresses, opts = {}) {
       per[slug].spent += m.spent;
     }
     for (const r of Object.values(per)) {
-      /* Gas is a real cost and it is known exactly for mints done here, so it
-       * is subtracted rather than ignored. */
       r.net = (r.received + (r.holdValue || 0)) - r.spent - (r.gas || 0);
       r.netUsd = ethUsd ? r.net * ethUsd : null;
       rows.push({ wallet: a, ...r });
@@ -2202,9 +1885,6 @@ async function pnl(chainKey, addresses, opts = {}) {
     holdValue: a.holdValue + (r.holdValue || 0), net: a.net + r.net,
   }), { spent: 0, received: 0, gas: 0, holdValue: 0, net: 0 });
 
-  /* Best collections, merged across wallets — this is what the home dashboard
-   * shows as "Top plays", so it is computed here rather than in the UI where
-   * only the cached slice is available. */
   const byCol = {};
   for (const r of rows) {
     byCol[r.collection] = byCol[r.collection] || { collection: r.collection, net: 0, holding: 0 };
@@ -2227,8 +1907,6 @@ module.exports = {
   transferBatch, sweepCollectionBulk, deployBatchSender, getBatchSender,
   listNftBulk, cancelBatch,
   extractListingOrder, typesMatch, approvalOperator,
-  /* internals exported for the self-test harness (/tmp/sim-all.js) — pure
-   * logic only, not wired to any HTTP route */
   verifyListingOrder, normalizeOrder, seaportVersion, decodeFulfillCalldata, encodeFromInputData, ORDER_TYPES,
   shouldRelist, collectionFloor, collectionListingCurrency, startFloorWar, stopFloorWar, listFloorWars,
   bestOffers, acceptOffer, acceptOffersBulk, previewOfferAccept, tokenInfo, pnl, osFetch,

@@ -1,7 +1,4 @@
 'use strict';
-/* Rolling activity feed for the home dashboard.
- * Sealed because it holds wallet addresses. Capped so it can never grow
- * unbounded inside the vault blob. */
 const store = require('./store');
 
 const NAME = 'activity';

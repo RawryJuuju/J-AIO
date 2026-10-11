@@ -1,5 +1,4 @@
 'use strict';
-/* Proxy manager — groups, bulk import, health probe, per-account binding. */
 const store = require('./store');
 
 const NAME = 'proxies';
@@ -20,7 +19,6 @@ function removeGroup(id) {
   save(d); return true;
 }
 
-/* Accepts: host:port:user:pass | host:port | http://user:pass@host:port | socks5://... */
 function parseProxy(line) {
   const s = line.trim();
   if (!s) return null;
@@ -131,7 +129,6 @@ function agentFor(proxyId) {
   return new ProxyAgent(toUrl(p));
 }
 
-/* Round-robin pick from a group. */
 let rr = 0;
 function pickFromGroup(groupId) {
   const d = load();

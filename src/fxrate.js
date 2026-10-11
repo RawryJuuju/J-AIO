@@ -1,16 +1,4 @@
 'use strict';
-/* Shared FX rates: ETH→USD and USD→IDR.
- *
- * Three modules were each hitting Coinbase on their own for ETH-USD, so a
- * single PnL run could fire the same request a dozen times and still show a
- * different number per panel. One cache, one source of truth, and IDR comes
- * along for free — every cost the operator sees is in the currency they
- * actually pay in.
- *
- * Rates are cached for TTL_MS. A failed refresh keeps the last good value
- * rather than blanking the UI, and a persisted copy in settings survives
- * restarts so an offline boot still shows something sane.
- */
 const store = require('./store');
 
 const TTL_MS = 5 * 60 * 1000;
@@ -24,8 +12,6 @@ async function fetchJson(url) {
   return r.json();
 }
 
-/* Persisted fallbacks. Settings are readable while locked for plain keys, so
- * this works even before unlock. */
 function seed() {
   if (cache.ethUsd != null) return;
   let s = {};
@@ -35,7 +21,6 @@ function seed() {
 }
 
 function persist() {
-  /* Writing settings needs the vault open; skip silently when locked. */
   if (store.isLocked && store.isLocked()) return;
   try {
     const cur = store.readSettings();
@@ -43,7 +28,6 @@ function persist() {
   } catch { /* locked mid-write or read-only fs */ }
 }
 
-/* Rates, refreshed at most once per TTL. Never throws. */
 async function rates(force) {
   seed();
   if (!force && Date.now() - cache.at < TTL_MS && cache.ethUsd != null) return { ...cache };
@@ -63,8 +47,6 @@ async function rates(force) {
   return { ...cache };
 }
 
-/* Convenience: ETH amount -> { usd, idr }. Nulls propagate so the UI can show
- * an em dash instead of a fake zero. */
 function convert(eth, r) {
   const n = Number(eth);
   if (!isFinite(n)) return { usd: null, idr: null };

@@ -1,5 +1,4 @@
 'use strict';
-/* Tasks Dashboard page — unified grid for all active and historical tasks. */
 
 page('tasks', {
   label: 'Tasks', group: 'Minting', icon: 'tools',

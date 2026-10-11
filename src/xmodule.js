@@ -1,6 +1,4 @@
 'use strict';
-/* X (Twitter) module — follow/unfollow/like/RT/reply/tweet across many accounts,
- * per-account proxy, jitter delays, GraphQL query IDs. */
 const store = require('./store');
 const accounts = require('./accounts');
 const proxies = require('./proxies');
@@ -62,8 +60,6 @@ async function call(acc, method, url, body) {
     throw err;
   }
   if (data?.errors?.length) {
-    // A GraphQL error envelope arrives with HTTP 200; the numeric code is the
-    // only reliable discriminator (messages are localised by exit-IP geo).
     const err = new Error(data.errors[0].message || 'x api error');
     err.xCode = Number(data.errors[0].code) || 0;
     err.status = 200;
@@ -90,7 +86,6 @@ async function resolveUser(acc, handle) {
   return { id: u.rest_id, handle: u.legacy?.screen_name, followers: u.legacy?.followers_count };
 }
 
-/* ---------------- primitives ---------------- */
 
 async function follow(acc, handle) {
   const u = await resolveUser(acc, handle);
@@ -132,9 +127,6 @@ function tweetIdFrom(input) {
   throw new Error(`cannot parse tweet id from: ${String(input).slice(0, 40)}`);
 }
 
-/* X answers HTTP 200 + an error envelope for no-op writes. These codes mean the
-   desired end state already holds, so a quest checker sees them as done:
-   139 already favorited · 327 already retweeted · 34/144 target gone. */
 const ALREADY = { 139: 'already liked', 327: 'already retweeted' };
 
 async function callIdem(acc, url, body) {
@@ -203,13 +195,7 @@ async function tweet(acc, text, replyTo, quoteUrl) {
   return { tweetId: id, url: id ? `https://x.com/${acc.xHandle || 'i'}/status/${id}` : null };
 }
 
-/* ---------------- batch runner ---------------- */
 
-/*
-cfg = { action:'follow'|'unfollow'|'like'|'retweet'|'reply'|'tweet'|'quote',
-        accountGroup, accountIds[], targets:[handles or tweet urls],
-        text, minDelayMs, maxDelayMs, concurrency }
-*/
 async function start(cfg) {
   const runId = nid('xrun');
   const accs = (cfg.accountIds && cfg.accountIds.length

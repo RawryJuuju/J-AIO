@@ -1,19 +1,10 @@
 'use strict';
-/* EVM mint page — single-screen layout.
- *
- * Everything needed for the common path (paste -> pick wallets -> pick gas -> fire)
- * is visible without scrolling. The knobs that only matter for odd contracts
- * (raw hex, manual gwei, nonce, monitor tuning) live behind <details class="adv">
- * so they are one click away but never in the way.
- */
 
 const MSEL = new Set();  // selected wallet ids for mint
 
 page('mint', {
   label: 'EVM Mint', group: 'Minting', icon: 'mint',
   render(el) {
-    /* fit = this page owns the viewport: the form is fixed-height and the Live
-       console flexes into whatever is left, so the page never scrolls. */
     el.classList.add('fit');
     el.innerHTML = `
       <div class="crumb">
@@ -175,7 +166,6 @@ page('mint', {
       const w = S.wallets.evm.find((x) => x.address.toLowerCase() === String(addr || '').toLowerCase());
       return w ? w.name : short(addr, 6);
     };
-    /* Human-friendly reason — normies don't read raw revert hex. */
     function friendlyErr(e) {
       const s = String(e || '');
       if (/insufficient balance|insufficient funds|no balance/i.test(s)) return 'no balance';
@@ -187,7 +177,6 @@ page('mint', {
       return (s.match(/[^:]{2,60}$/) || [s]).join('').trim() || 'failed';
     }
 
-    /* --- method switching --- */
     function syncMethod() {
       const m = $('mMethod').value;
       $('mFnWrap').style.display = m === 'abi' ? '' : 'none';
@@ -195,8 +184,6 @@ page('mint', {
       $('mHexWrap').style.display = m === 'hex' ? '' : 'none';
       $('mOsWrap').style.display = m === 'opensea-api' ? '' : 'none';
       $('mFcfsRow').style.display = m === 'opensea-api' ? '' : 'none';
-      /* Proxy only matters for the signed-API path — a raw JSON-RPC send goes
-         out over the RPC endpoint, not an HTTP proxy. Label says so. */
       const px = m === 'opensea-api';
       $('mProxy').disabled = !px;
       $('mProxyH').textContent = px ? 'optional · OpenSea API' : 'OpenSea API only';
@@ -204,15 +191,11 @@ page('mint', {
     }
     $('mMethod').onchange = syncMethod;
 
-    /* --- proxy + rpc pickers --------------------------------------------- */
     function renderProxies() {
       const gs = S.proxies || [];
       $('mProxy').innerHTML = '<option value="">(no proxy)</option>'
         + gs.map((g) => `<option value="${esc(g.id)}">${esc(g.name)} (${g.healthy}/${g.count})</option>`).join('');
     }
-    /* RPC groups are per-chain, so this re-runs on every chain change. An empty
-       list is not an error: mint.js falls back to the built-in public RPCs, but
-       that is worth warning about before a competitive mint. */
     function renderRpcs() {
       const ck = $('mChain').value;
       const gs = (S.rpcs || []).filter((g) => g.chain === ck);
@@ -224,7 +207,6 @@ page('mint', {
       sel.disabled = !gs.length;
       syncWarn();
     }
-    /* Footer warning strip: one line, highest severity wins. */
     function syncWarn() {
       const ck = $('mChain').value;
       const gs = (S.rpcs || []).filter((g) => g.chain === ck);
@@ -237,7 +219,6 @@ page('mint', {
       $('mWarn').innerHTML = msg ? `<span class="wtri">▲</span> ${esc(msg)}` : '';
     }
 
-    /* Chain drives: unit suffix, RPC list, gas quote, warning. */
     function syncChain() {
       $('mChainU').dataset.u = nativeSym($('mChain').value);
       qa('.mfu[data-native]').forEach((e2) => { e2.dataset.u = nativeSym($('mChain').value); });
@@ -246,9 +227,6 @@ page('mint', {
     }
     $('mChain').addEventListener('change', syncChain);
 
-    /* Timestamp is a plain epoch field ("now" placeholder). Blank = fire now.
-       Accepts seconds or milliseconds — anything under 1e12 is treated as seconds,
-       which covers every realistic mint date through the year 33658. */
     function parseTs() {
       const v = ($('mTs').value || '').trim();
       if (!v) return null;
@@ -275,11 +253,6 @@ page('mint', {
       syncWarn();
     };
 
-    /* --- gas presets ---------------------------------------------------- */
-    /* The number under each preset is what that preset would cost RIGHT NOW at
-       the current base fee, computed server-side by the same resolveGas() the
-       run uses — so the button and the tx agree. maxTotal is a ceiling: EIP-1559
-       refunds the unused headroom. */
     qa('#mSeg button').forEach((b) => {
       b.onclick = () => {
         PRESET = b.dataset.preset;
@@ -326,18 +299,11 @@ page('mint', {
         + (fiat ? ` (${fiat})` : ''));
     }
 
-    /* mChain has its own syncChain handler (unit + RPC + gas), so it's not in
-       this list — otherwise refreshGas would fire twice per change. */
     ['mAmt', 'mPrice', 'mGasLimit'].forEach((id) => {
       const e2 = $(id);
       if (e2) e2.addEventListener('change', refreshGas);
     });
 
-    /* --- wallets --------------------------------------------------------- */
-    /* The Wallets field is a group picker, not a per-wallet pill list: picking a
-       group selects every wallet in it. "Funded Only" narrows that set to wallets
-       whose balance covers the current preset, so a competitive mint never wastes
-       a slot on a dry wallet. The whole thing stays one row tall. */
     let BALCACHE = null; // { chain, balances: {addrLower: eth} }
     function renderWG() {
       $('mWGroup').innerHTML = '<option value="">All groups</option>'
@@ -371,8 +337,6 @@ page('mint', {
       rows.forEach((w) => MSEL.add(w.id));
       syncMintBtns();
     }
-    /* Gate Arm & Mint on having at least one wallet, with the reason shown rather
-       than a deep launch() throw. */
     function syncMintBtns() {
       const n = MSEL.size;
       const total = candidateWallets().length;
@@ -383,13 +347,8 @@ page('mint', {
     $('mWGroup').onchange = applyWallets;
     $('mWFunded').onchange = applyWallets;
     renderWG(); applyWallets();
-    /* Initial paint of everything that depends on chain/method state. Runs after
-       the render helpers exist, so all forward refs are resolved. */
     renderProxies(); renderRpcs(); syncMethod(); syncChain();
 
-    /* Handed over from Projects → "Create mint tasks": contract, chain, price,
-       quantity and the exact eligible wallet set are already known there, so
-       arriving here should need nothing but Resolve. Consumed once. */
     if (S.prefillMint) {
       const p = S.prefillMint;
       S.prefillMint = null;
@@ -405,7 +364,6 @@ page('mint', {
       ok('Prefilled', `${p.label || 'project'} · ${MSEL.size} wallet(s)`);
     }
 
-    /* --- resolve --------------------------------------------------------- */
     $('mResolve').onclick = async () => {
       const b = $('mResolve'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
       try {
@@ -416,7 +374,6 @@ page('mint', {
       } catch (e) { err('Resolve failed', e.message); $('mInfo').innerHTML = `<div class="failbox">${esc(e.message)}</div>`; }
       finally { b.disabled = false; b.textContent = 'Resolve'; }
     };
-    /* paste-and-go: Enter in the URL field resolves */
     $('mUrl').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('mResolve').click(); });
 
     function applyResolve(r) {
@@ -424,9 +381,6 @@ page('mint', {
       if (r.address) $('mUrl').dataset.addr = r.address;
       STAGES = r.stages || [];
       const st = STAGES;
-      /* One-line resolved summary. Full detail lives in the Probe modal; the
-         phase dropdown carries per-phase price. Keeping this to a single line is
-         what lets the six input rows stay above the fold. */
       const supply = r.supply ?? r.probe?.maxSupply;
       const minted = r.probe?.minted;
       $('mInfo').innerHTML = `<b>${esc(r.platform)}</b>`
@@ -435,8 +389,6 @@ page('mint', {
         + (minted != null ? ` · minted ${esc(String(minted))}` : '')
         + (r.note ? ` · <span class="mut">${esc(r.note)}</span>` : '');
 
-      /* Phase dropdown is method-agnostic now — an ABI contract with on-chain
-         phases gets the same picker as an OpenSea drop. */
       $('mStage').innerHTML = st.length
         ? st.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}${s.price != null ? ` · ${esc(String(s.price))} ${esc(nativeSym($('mChain').value))}` : ''}</option>`).join('')
         : '<option value="">no phases found</option>';
@@ -459,8 +411,6 @@ page('mint', {
       $('mStage').onchange = () => applyStage(st.find((x) => String(x.id) === $('mStage').value), r.probe);
     }
 
-    /* One place that pushes a phase into price / cap / trigger, so the dropdown
-       and the Resolve auto-fill can never disagree. */
     function applyStage(s, probe) {
       const cap = (s && s.maxPerWallet) ?? (probe && probe.maxPerWallet);
       $('mAmtH').textContent = cap != null ? `max ${cap}` : '';
@@ -500,8 +450,6 @@ page('mint', {
       finally { b.disabled = false; b.textContent = 'Probe'; }
     };
 
-    /* Selected RPC group -> healthy URLs. Empty = auto (mint.js races every
-       healthy URL it knows for the chain, then the public fallbacks). */
     function selectedRpcUrls() {
       const id = $('mRpc').value;
       if (!id) return [];
@@ -511,7 +459,6 @@ page('mint', {
       return urls.length ? urls : g.rpcs.map((r) => r.url);
     }
 
-    /* --- build cfg ------------------------------------------------------- */
     function buildCfg(mode) {
       const addr = ($('mUrl').dataset.addr) || ($('mUrl').value.match(/0x[a-fA-F0-9]{40}/) || [])[0] || (RES && RES.address);
       const method = $('mMethod').value;
@@ -524,7 +471,6 @@ page('mint', {
         pricePerNft: $('mPrice').value || '0',
         walletIds: [...MSEL],
         gasLimit: $('mGasLimit').value ? Number($('mGasLimit').value) : null,
-        // preset drives fee + tip; the manual fields below still override it
         gasPreset: PRESET,
         maxFee: $('mMaxFee').value || null,
         priorityFee: $('mTip').value || null,
@@ -532,14 +478,10 @@ page('mint', {
         maxRetries: Number($('mRetries').value || 3),
         flashbots: $('mFlash').checked, flashbotsBundle: $('mBundle').checked,
         stopOnSoldOut: $('mSoldOut').checked,
-        // blank = auto: mint.js pulls the nonce per wallet at 'pending'
         nonceOverride: $('mNonce').value !== '' ? Number($('mNonce').value) : null,
-        // proxy only affects the signed OpenSea API path, not JSON-RPC sends
         proxyGroup: (method === 'opensea-api' && $('mProxy').value) || null,
-        // empty array = let mint.js race the built-in public RPCs for this chain
         rpcs: selectedRpcUrls(),
       };
-      // phase applies to every method — an ABI contract can be phase-gated too
       if ($('mStage').value) cfg.stageId = $('mStage').value;
       if (method === 'abi') {
         cfg.function = $('mFn').value.trim();
@@ -548,13 +490,10 @@ page('mint', {
         cfg.hex = $('mHex').value.trim();
       } else {
         cfg.slug = $('mSlug').value.trim();
-        // FCFS bundle — pre-gate calldata hammer for timed OpenSea mints
         cfg.fcfs = $('mFcfs').checked;
         cfg.osPath = $('mOsPath').value;
         if ($('mFcfsLead').value !== '') cfg.fcfsLeadMs = Number($('mFcfsLead').value);
       }
-      // Trigger: on-chain flag wins if set, else a filled Timestamp arms a
-      // timed start, else fire immediately. No separate mode select needed.
       const monFn = $('mMonFn').value.trim();
       const ts = parseTs();
       if (monFn) {
@@ -562,8 +501,6 @@ page('mint', {
       } else if (ts !== null && !Number.isNaN(ts)) {
         cfg.startTimestamp = Math.floor(ts / 1000);
         cfg.monitor = { mode: 'timestamp', pollMs: Number($('mPoll').value || 150) };
-        // FCFS timing: how the engine treats the timestamp. auto = chain-aware
-        // (lead on slow-block chains, gate-poll on fast sequenced chains).
         cfg.fireMode = $('mFireMode').value;
         cfg.leadMs = $('mLead').value !== '' ? Number($('mLead').value) : null;
         cfg.chainSync = $('mChainSync').checked;
@@ -587,8 +524,6 @@ page('mint', {
       } catch (e) { err('Start failed', e.message); }
     }
 
-    /* Mode segment in the firebar: Spam / Execute. The picked mode is
-       what Arm & Mint fires, so the choice and the button are side by side. */
     let MODE = 'execute';
     qa('#mModeSeg button').forEach((b) => {
       b.onclick = () => {
@@ -596,8 +531,6 @@ page('mint', {
         qa('#mModeSeg button').forEach((x) => x.classList.toggle('on', x === b));
       };
     });
-    /* Advanced panel toggle. Closed it is 0 height (display:none); open it
-       grows the form and the form's own scroll handles the overflow. */
     $('mAdvBtn').onclick = () => {
       const p = $('mAdvPanel');
       const open = p.style.display !== 'none';
@@ -659,11 +592,8 @@ page('mint', {
       }, 1500);
     }
 
-    /* live gas refresh while the page is open — the preset cost labels go stale
-       fast during a gas spike, which is exactly when they matter */
     refreshGas();
     const gasIv = setInterval(() => { if (S.page === 'mint') refreshGas(); }, 20000);
-    /* smooth 1s countdown between the 1.5s status polls */
     const cdIv = setInterval(() => {
       const fi = $('mFireIn');
       if (fi && gateInfo && gateInfo.gateMs) fi.textContent = fmtCountdown(gateInfo.gateMs + gateInfo.offsetMs - Date.now());

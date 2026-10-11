@@ -1,6 +1,4 @@
 'use strict';
-/* Sniper Engine — monitor listings & auto-buy via Seaport 1.6 fulfillOrder.
- * Safety: confirm typed, max price guard, dry-run mode option. */
 
 const { ethers } = require('ethers');
 const store = require('./store');

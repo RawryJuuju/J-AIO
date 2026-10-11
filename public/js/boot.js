@@ -1,6 +1,4 @@
 'use strict';
-/* Boot: nav render, routing, unlock flow, global gwei/eth ticker.
- * The landing page lives in home.js — this file no longer defines one. */
 
 async function stopRun(id, isSol) {
   try {
@@ -9,7 +7,6 @@ async function stopRun(id, isSol) {
   } catch (e) { err('Stop failed', e.message); }
 }
 
-/* ---------- nav + routing ---------- */
 const NAV_ORDER = ['Overview', 'Minting', 'NFT', 'Wallets', 'Identity', 'Infra'];
 const PAGE_ORDER = ['home', 'quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'btc', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
 
@@ -23,14 +20,12 @@ function renderNav() {
   const item = ([k, p]) => `<button data-p="${k}" title="${esc(p.label)}"><span class="ic">${icon(p.icon)}</span>${esc(p.label)}</button>`;
   nav.innerHTML = NAV_ORDER.filter((g) => groups[g]).map((g) => {
     const items = groups[g].slice().sort(([ak], [bk]) => PAGE_ORDER.indexOf(ak) - PAGE_ORDER.indexOf(bk));
-    // skip the header when a group holds one page named after the group (Overview/Wallets)
     const redundant = items.length === 1 && (items[0][1].label === g || g === 'Overview');
     return (redundant ? '' : `<div class="grp">${esc(g)}</div>`) + items.map(item).join('');
   }).join('');
   qa('nav button').forEach((b) => { b.onclick = () => { go(b.dataset.p); closeNav(); }; });
 }
 
-/* mobile nav drawer */
 function closeNav() {
   $('nav').classList.remove('open');
   $('navScrim').classList.remove('on');
@@ -43,10 +38,6 @@ $('navToggle').onclick = () => {
 };
 $('navScrim').onclick = closeNav;
 
-/* Keep-alive routing: every page renders ONCE into its own container and is
- * hidden (not destroyed) on navigation — inputs, loaded NFTs and scroll
- * survive going back. Pages may define el._hide() / el._show() to pause and
- * resume background timers; legacy el._cleanup is treated as the hide hook. */
 const PAGE_ELS = {};
 
 function hidePage(el) {
@@ -78,12 +69,10 @@ function go(key) {
     el.style.display = '';
     showPage(el);
   }
-  // the fixed wallet/NFT selection bar belongs to the visible page only
   main.classList.toggle('has-selbar', !!el.querySelector('.selbar:not(.hide)'));
   location.hash = key;
 }
 
-/* ---------- global data load ---------- */
 async function loadAll() {
   const [st, we, ws, wb, ac, px, rp] = await Promise.all([
     api('/state'), api('/wallets?kind=evm'), api('/wallets?kind=sol'), api('/wallets?kind=btc'),
@@ -97,7 +86,6 @@ async function loadAll() {
   S.proxies = px; S.rpcs = rp;
 }
 
-/* ---------- gwei ticker ---------- */
 async function tickGas() {
   try {
     const chain = ($('hChain') && $('hChain').value) || 'ethereum';
@@ -108,8 +96,6 @@ async function tickGas() {
   } catch { /* locked or offline */ }
 }
 
-/* Gas chain selector in the header — J-AIO-style per-chain ticker. Choice is
-   remembered across sessions so the operator's usual chain shows first. */
 function initGasChain() {
   const hc = $('hChain');
   if (!hc || !S.chains.length) return;
@@ -120,15 +106,11 @@ function initGasChain() {
   hc.onchange = () => { localStorage.setItem('jaio-hchain', hc.value); tickGas(); };
 }
 
-/* ---------- clock ----------
- * Drops announce their window in UTC; the operator thinks in WIB. Showing the
- * local wall clock next to gwei means no mental conversion at mint time. */
 function tickClock() {
   const el = $('hClock');
   if (el) el.textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
 }
 
-/* ---------- boot ---------- */
 async function boot() {
   let st;
   try { st = await api('/state'); } catch (e) { $('lockHint').textContent = 'Server unreachable'; return; }

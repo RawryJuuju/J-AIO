@@ -1,5 +1,4 @@
 'use strict';
-/* ABI resolution + contract probing (phases, price, limits, proxy impl). */
 const { ethers } = require('ethers');
 const store = require('./store');
 const chainsMod = require('./chains');
@@ -17,7 +16,6 @@ function cacheSet(chainKey, addr, val) {
   store.writePlain(CACHE, c);
 }
 
-/* Etherscan V2 multichain (one key, chainid param) + Sourcify fallback. */
 async function fetchAbi(chainKey, address) {
   const cached = cacheGet(chainKey, address);
   if (cached) return cached;
@@ -59,13 +57,11 @@ async function fetchAbi(chainKey, address) {
   throw new Error(`ABI not found: ${String(lastErr?.message || lastErr).slice(0, 100)}`);
 }
 
-/* Detect EIP-1967 / ERC-1167 proxies on chain. */
 async function detectProxy(chainKey, address) {
   const SLOT_1967 = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
   const SLOT_BEACON = '0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50';
   try {
     const code = await rpc.readAny(chainKey, (p) => p.getCode(address));
-    // ERC-1167 minimal proxy: 363d3d373d3d3d363d73<addr>5af43d82803e903d91602b57fd5bf3
     const m = /363d3d373d3d3d363d73([0-9a-f]{40})5af43d82/i.exec(code);
     if (m) return { proxy: true, impl: ethers.getAddress('0x' + m[1]), kind: 'erc1167' };
     for (const [slot, kind] of [[SLOT_1967, 'eip1967'], [SLOT_BEACON, 'beacon']]) {
@@ -79,7 +75,6 @@ async function detectProxy(chainKey, address) {
   } catch (e) { return { proxy: false, error: String(e.message).slice(0, 80) }; }
 }
 
-/* Resolve ABI, following proxies to the implementation. */
 async function resolveAbi(chainKey, address) {
   let impl = null;
   const pr = await detectProxy(chainKey, address);
@@ -113,7 +108,6 @@ function dedupeAbi(abi) {
   });
 }
 
-/* State-changing functions only, for the function picker. */
 function writeFunctions(abi) {
   return abi.filter((f) => f.type === 'function' && !['view', 'pure'].includes(f.stateMutability))
     .map((f) => ({
@@ -125,7 +119,6 @@ function writeFunctions(abi) {
     }));
 }
 
-/* ---------- phase / price probing (works without ABI) ---------- */
 
 const PROBES = [
   ['function mintPhases() view returns (tuple(string name, uint256 price, uint256 maxPerWallet, uint256 startTime, uint256 endTime, bytes32 merkleRoot)[])', 'phases'],
@@ -185,8 +178,6 @@ async function probeContract(chainKey, address, rpcUrls) {
     } catch { /* decode mismatch */ }
     out[`_${name}`] = true;
   }
-  // SeaDrop-aware: ERC-1167 proxy → impl bytecode has mintPublic (0x161ac21f) →
-  // real state lives on the SeaDrop singleton, not the NFT proxy.
   const SEA_DROP = '0x00005EA00Ac477B1030CE78506496e8C2dE24bf5';
   try {
     let targetCode = null;
@@ -195,8 +186,6 @@ async function probeContract(chainKey, address, rpcUrls) {
       if (dp && dp.impl) targetCode = await rpc.readRace(chainKey, (p) => p.getCode(dp.impl), rpcUrls);
     } catch { /* not a proxy */ }
     if (targetCode == null) targetCode = await rpc.readRace(chainKey, (p) => p.getCode(address), rpcUrls);
-    // SeaDrop NFT impl exposes mintSeaDrop(address,uint256)=0x64869dad; the
-    // mint fns (mintPublic 0x161ac21f / mintSigned 0x4b61cd6f) live on the singleton.
     if (targetCode && /64869dad/i.test(targetCode)) {
       const sif = new ethers.Interface([
         'function getPublicDrop(address) view returns (uint256 mintPrice, uint256 startTime, uint256 endTime, uint256 maxTotalMintableByWallet, uint256 feeBps, bool restrictFeeRecipients)',
@@ -239,7 +228,6 @@ async function probeContract(chainKey, address, rpcUrls) {
   return out;
 }
 
-/* Fill {wallet}, {self}, {idN} tokens then coerce to ABI types. */
 function resolveParam(raw, type, ctx) {
   let v = raw;
   if (typeof v === 'string') {
@@ -257,7 +245,6 @@ function resolveParam(raw, type, ctx) {
   if (type === 'bool') return v === true || /^(true|1|yes)$/i.test(String(v));
   if (type === 'address') return ethers.getAddress(String(v));
   if (/^bytes\d*$/.test(type)) return String(v).startsWith('0x') ? v : '0x' + v;
-  // tuple(...): accept a JSON array string from the UI (e.g. ["0x00..",[]])
   if (/^tuple/.test(type)) {
     if (typeof v === 'string') { try { return JSON.parse(v); } catch { return v; } }
     return v;
@@ -270,8 +257,6 @@ function encodeCall(abi, funcSig, params, ctx) {
   let frag = iface.fragments.find((f) => f.type === 'function' && (
     `${f.name}(${f.inputs.map((i) => i.type).join(',')}` === funcSig || f.name === funcSig));
   if (!frag) {
-    // tuple types normalise to "tuple(...)" so "(a,b)" signatures won't match
-    // literally — fall back to name match when unambiguous.
     const name = String(funcSig).split('(')[0];
     const byName = iface.fragments.filter((f) => f.type === 'function' && f.name === name);
     if (byName.length === 1) frag = byName[0];

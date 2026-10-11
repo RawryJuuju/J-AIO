@@ -1,13 +1,4 @@
 'use strict';
-/* Quick Mint — the beginner path.
- *
- * One input. Paste an OpenSea/launchpad URL or a bare 0x contract address and
- * everything else fills itself in: chain, platform, mint phase, price, amount
- * cap, mint method, calldata and start time. The old EVM Mint page is still
- * there for manual control; this page never asks for a function signature.
- *
- * Flow: paste -> auto-detect -> pick wallets -> Check -> Simulate -> Mint.
- */
 
 const QSEL = new Set();     // selected wallet ids
 
@@ -75,9 +66,7 @@ page('quick', {
       return w ? w.name : short(addr, 6);
     };
 
-    /* ---------- detection ---------- */
 
-    /* Anything that looks like a URL or a 40-hex address is enough to try. */
     function looksMintable(v) {
       const s = v.trim();
       return /^0x[a-fA-F0-9]{40}$/.test(s) || /^https?:\/\/\S+\.\S+/.test(s);
@@ -148,8 +137,6 @@ page('quick', {
       renderWG(); renderPills();
     }
 
-    /* countdown sources: stageGateMs = selected phase start (wall clock),
-       qGateInfo = armed run gate from status polls (chain-synced) */
     let stageGateMs = null, qGateInfo = null;
 
     function syncStage() {
@@ -178,7 +165,6 @@ page('quick', {
     }
     $('qStage').onchange = syncStage;
 
-    /* ---------- gas estimate ---------- */
     async function qGas() {
       if (!RES) return;
       try {
@@ -212,7 +198,6 @@ page('quick', {
       return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
     }
 
-    /* auto-detect on paste, and on typing once it stops for 700ms */
     let dtv = null;
     $('qUrl').addEventListener('input', () => {
       clearTimeout(dtv);
@@ -223,7 +208,6 @@ page('quick', {
     $('qUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(dtv); detect(false); } });
     $('qDetect').onclick = () => { clearTimeout(dtv); detect(false); };
 
-    /* ---------- wallets ---------- */
     function renderWG() {
       const cur = $('qWGroup').value;
       $('qWGroup').innerHTML = '<option value="">All groups</option>'
@@ -239,7 +223,6 @@ page('quick', {
         box.innerHTML = emptyState({ icon: 'wallets', title: 'No EVM wallets', desc: 'Add wallets first.', action: { label: 'Open Wallets', onclick: "go('wallets')" } });
         QSEL.clear(); syncBtns(); return;
       }
-      // drop stale ids so a deleted wallet cannot end up in a run
       const live = new Set(rows.map((w) => w.id));
       [...QSEL].forEach((id) => { if (!live.has(id)) QSEL.delete(id); });
       box.appendChild(pillList(rows.map((w) => ({ id: w.id, label: w.name })), QSEL, syncBtns));
@@ -255,7 +238,6 @@ page('quick', {
     $('qWAll').onclick = () => { const g = $('qWGroup').value; S.wallets.evm.filter((w) => !g || w.groupId === g).forEach((w) => QSEL.add(w.id)); renderPills(); };
     $('qWNone').onclick = () => { QSEL.clear(); renderPills(); };
 
-    /* ---------- eligibility ---------- */
     const VERDICT = {
       eligible: ['ok', 'Eligible'],
       not_eligible: ['fail', 'Not eligible'],
@@ -299,7 +281,6 @@ page('quick', {
       finally { b.disabled = false; b.textContent = 'Check eligible'; }
     };
 
-    /* ---------- build + run ---------- */
     function cfgFor(mode) {
       if (!RES) throw new Error('detect a collection first');
       if (!QSEL.size) throw new Error('no wallets selected');
@@ -313,7 +294,6 @@ page('quick', {
         mode, maxRetries: 3, stopOnSoldOut: true,
         tipMultiplier: 2,
       };
-      // method + calldata straight from detection — no manual ABI work
       if (RES.mintMethod === 'opensea-api') {
         cfg.method = 'opensea-api';
         cfg.slug = RES.slug;
@@ -376,7 +356,6 @@ page('quick', {
     $('qStop').onclick = async () => { if (runId) await stopRun(runId, false); };
 
     let iv = null;
-    /* Human-friendly reason — normies don't read raw revert hex. */
     function friendlyErr(e) {
       const s = String(e || '');
       if (/insufficient balance|insufficient funds|no balance/i.test(s)) return 'no balance';
@@ -423,7 +402,6 @@ page('quick', {
 
     syncBtns();
     const qGasIv = setInterval(() => { if (S.page === 'quick' && RES) qGas(); }, 20000);
-    /* smooth 1s countdown: phase "Opens in" + armed run "Fire in" */
     const qCdIv = setInterval(() => {
       if (S.page !== 'quick') return;
       const si = $('qStageIn');
@@ -435,9 +413,6 @@ page('quick', {
   },
 });
 
-/* =========================================================
-   ELIGIBILITY — standalone sweep across many wallets
-   ========================================================= */
 page('eligible', {
   label: 'Check Eligible', group: 'Minting', icon: 'check',
   render(el) {

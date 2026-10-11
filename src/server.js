@@ -1,6 +1,4 @@
 'use strict';
-/* J-AIO server — localhost only, no auth (single-user local tool).
- * Serves /public and a JSON API over all modules. */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -43,7 +41,6 @@ function jsonSafe(v) {
   }));
 }
 
-/* Never let a key, token, or password reach the client in any field name. */
 const SECRET_FIELD_NAMES = [
   'pk', 'privateKey', 'secretKey', 'mnemonic', 'seed', 'wif',
   'gmailAppPass', 'xToken', 'xCt0', 'discordToken', 'pass', 'password',
@@ -72,7 +69,6 @@ async function readBody(req) {
   catch { return {}; }
 }
 
-/* ---------------- SSE ---------------- */
 
 const sseClients = new Set();
 
@@ -85,10 +81,8 @@ mint.bus.on('event', (e) => sseSend({ kind: 'mint', ...e }));
 xmodule.bus.on('event', (e) => sseSend({ kind: 'x', ...e }));
 wl.bus.on('event', (e) => sseSend({ kind: 'wl', ...e }));
 
-/* ---------------- routes ---------------- */
 
 const routes = {
-  /* --- session / vault --- */
   'GET /api/state': async () => ({
     locked: store.isLocked(), initialized: store.isInitialized(),
     chains: chainsMod.list(), settings: redactSettings(store.readSettings()),
@@ -106,10 +100,8 @@ const routes = {
   },
   'POST /api/lock': async () => { store.lock(); store.appendLog('security.log', 'vault locked (manual)'); return { locked: true }; },
 
-  /* --- fx rates (ETH→USD, USD→IDR) --- */
   'GET /api/fx': async (b, q) => fxrate.rates(q && q.force === '1'),
 
-  /* --- settings --- */
   'GET /api/settings': async () => redactSettings(store.readSettings()),
   'POST /api/settings': async (b) => {
     const cur = store.readSettings();
@@ -126,7 +118,6 @@ const routes = {
     return redactSettings(store.readSettings());
   },
 
-  /* --- chains + rpc --- */
   'GET /api/chains': async () => chainsMod.list(),
   'POST /api/chains/custom': async (b) => chainsMod.addCustom(b),
   'DELETE /api/chains/custom': async (b) => chainsMod.removeCustom(b.key),
@@ -149,7 +140,6 @@ const routes = {
   'DELETE /api/rpc': async (b) => rpc.removeRpc(b.groupId, b.url || b.rpcId),
   'POST /api/rpc/seed': async () => rpc.seedDefaults(),
 
-  /* --- proxies --- */
   'GET /api/proxies': async () => proxies.listSafe(),
   'POST /api/proxies/group': async (b) => proxies.addGroup(b.name),
   'DELETE /api/proxies/group': async (b) => proxies.removeGroup(b.id),
@@ -157,7 +147,6 @@ const routes = {
   'POST /api/proxies/probe': async (b) => proxies.reprobeGroup(b.groupId, b.testUrl),
   'DELETE /api/proxies': async (b) => proxies.removeProxy(b.groupId, b.proxyId),
 
-  /* --- wallets --- */
   'GET /api/wallets': async (b, q) => ({
     groups: wallets.groups(q.kind || 'evm'),
     wallets: wallets.listSafe(q.kind || 'evm', q.groups ? q.groups.split(',') : null),
@@ -171,7 +160,6 @@ const routes = {
   'POST /api/wallets/bulk-rename': async (b) => ({ updated: wallets.bulkRename(b.kind || 'evm', b.ids, b.pattern) }),
   'DELETE /api/wallets': async (b) => ({ removed: wallets.removeWallet(b.kind || 'evm', b.id) }),
   'POST /api/wallets/export': async (b) => {
-    // Key export is the single most dangerous operation in the app: re-auth every time.
     if (!store.verifyPassword(b.password)) {
       store.appendLog('security.log', `DENIED key export (bad/missing master password) kind=${b.kind || 'evm'} ids=${(b.ids || []).length || 'all'}`);
       throw new Error('master password required to export private keys');
@@ -185,8 +173,6 @@ const routes = {
     const raw = kind === 'sol' ? await wallets.solBalances(b.addresses)
       : kind === 'btc' ? await wallets.btcBalances(b.addresses)
       : await wallets.balances(b.chain || 'ethereum', b.addresses, b.token);
-    // normalise {addr: row} -> [{address, balance, token}] so the page can
-    // iterate it directly ((r.balances || r).forEach)
     const balances = Object.entries(raw).map(([address, x]) => ({
       address,
       balance: x.native,
@@ -240,9 +226,7 @@ const routes = {
   'POST /api/wallets/delegation': async (b) => wallets.checkDelegation(b.chain, b.addresses),
   'POST /api/wallets/delegation/revoke': async (b) => wallets.revokeDelegation(b.chain, b.walletId),
 
-  /* --- accounts --- */
   'GET /api/accounts': async (b, q) => {
-    // ?group=<id> returns a flat array (page-level use); no query returns {groups, accounts}
     if (q.group) return accounts.listSafe([q.group]);
     return { groups: accounts.groups(), accounts: accounts.listSafe(q.groups ? q.groups.split(',') : null) };
   },
@@ -258,8 +242,6 @@ const routes = {
   'POST /api/accounts/update': async (b) => {
     const fields = b.fields || b;
     const a = accounts.updateAccount(b.id, fields);
-    // Auto-detect: a freshly pasted credential is probed immediately so the row
-    // fills in its handle and green/red state without a manual re-test.
     const which = [];
     if (fields.xToken) which.push('x');
     if (fields.discordToken) which.push('discord');
@@ -277,8 +259,6 @@ const routes = {
   'POST /api/accounts/bulk-connect': async (b) => {
     const r = accounts.bulkConnect(b.groupId, b.text, b.order, b.ids);
     if (b.probe === false || !r.ids.length || !r.which.length) return r;
-    // Probe only what the paste actually touched, so a Gmail-only paste does not
-    // hammer X/Discord for every row.
     const results = await accounts.testAccounts(r.ids, r.which.length === 1 ? r.which[0] : 'all');
     return { ...r, results };
   },
@@ -291,7 +271,6 @@ const routes = {
     : b.which === 'discord' ? accounts.testDiscord(b.id)
       : b.which === 'gmail' ? accounts.testGmailImap(b.id) : accounts.testX(b.id)),
 
-  /* --- launchpad / contract resolve --- */
   'POST /api/resolve': async (b) => launchpads.resolve(b.input, b.chain),
   'POST /api/abi': async (b) => {
     const r = await abiMod.resolveAbi(b.chain, b.address);
@@ -299,8 +278,6 @@ const routes = {
   },
   'POST /api/probe': async (b) => abiMod.probeContract(b.chain, b.address, b.rpcs),
 
-  /* --- mint --- */
-  // opensea-api resolves the target contract from the drop itself, so address is optional there.
   'POST /api/mint/start': async (b) => mint.start(
     b.method === 'opensea-api' && !b.address ? b : { ...b, address: addr(b.address, 'contract address') },
   ),
@@ -314,7 +291,6 @@ const routes = {
   'POST /api/gas': async (b) => mint.gasCalc(b.chain, b.gasLimit, b.gweis, b.nftCount, b.pricePerNft),
 
 
-  /* --- nft ops --- */
   'POST /api/nft/inventory': async (b) => nftops.inventory(b.chain, b.addresses, b),
   'POST /api/nft/transfer': async (b) => nftops.transferNft(b.chain, b.walletId, addr(b.contract, 'contract'), b.tokenId, addr(b.to, 'destination'), b),
   'POST /api/nft/sweep': async (b) => nftops.sweepCollection(b.chain, ids(b.walletIds, 'walletIds'), addr(b.contract, 'contract'), addr(b.to, 'destination'), b),
@@ -346,7 +322,6 @@ const routes = {
   'POST /api/nft/accept-offers': async (b) => nftops.acceptOffersBulk(b.chain, Array.isArray(b.items) ? b.items : [], b),
   'POST /api/nft/pnl': async (b) => {
     const r = await nftops.pnl(b.chain, b.addresses, b);
-    // cached so the home dashboard can show all-time PnL without re-crawling
     try { store.writeSealed('pnl_cache', { t: Date.now(), chain: b.chain, addresses: b.addresses, ...r }); } catch { /* locked */ }
     return r;
   },
@@ -354,7 +329,6 @@ const routes = {
     try { return store.readSealed('pnl_cache', null); } catch { return null; }
   },
 
-  /* --- nft viewer (collection manager) --- */
   'POST /api/nft/collection': async (b) => {
     const list = walletSelection(b);
     if (!list.length) throw new Error('no wallets selected');
@@ -369,8 +343,6 @@ const routes = {
   'GET /api/nft/pnl-card': async () => {
     try { return store.readSealed('pnl_card_last', null); } catch { return null; }
   },
-  /* Image proxy → data URL. Lets the PnL-card canvas use remote pictures
-     (OpenSea CDN etc.) without CORS tainting toDataURL(). */
   'GET /api/img': async (b, q) => {
     const u = String(q.url || '');
     if (!/^https?:\/\/[^/]/.test(u)) throw new Error('url required');
@@ -383,7 +355,6 @@ const routes = {
     return { dataUrl: `data:${type};base64,${buf.toString('base64')}` };
   },
 
-  /* --- whitelist checker (all stages at once) --- */
   'POST /api/wl/check': async (b) => wl.startCheck(b),
   'POST /api/wl/stop': async (b) => ({ ok: wl.stopCheck(b.runId) }),
   'GET /api/wl/status': async (b, q) => wl.statusCheck(q.runId),
@@ -392,7 +363,6 @@ const routes = {
   'POST /api/wl/custom/add': async (b) => wl.addCustomChecker(b.name, b.phases),
   'GET /api/wl/custom': async () => wl.listCustomCheckers(),
 
-  /* --- tasks --- */
   'GET /api/tasks': async () => taskmgr.listAllTasks(),
   'POST /api/tasks/stop': async (b) => ({ ok: taskmgr.stopTask(b.id, b.kind) }),
   'GET /api/projects': async () => ({ projects: wl.listProjects() }),
@@ -402,10 +372,7 @@ const routes = {
   'DELETE /api/projects': async (b) => ({ ok: wl.removeProject(b.id) }),
   'POST /api/projects/phase': async (b) => wl.phaseWallets(b.id, b.phaseId),
 
-  /* --- eligibility --- */
   'POST /api/eligibility': async (b) => {
-    /* full wallet objects (with keys, server-side only) — the OpenSea SIWE
-     * check signs a login message per wallet; responses never carry keys */
     const d = wallets.load('evm');
     const groups = b.groupIds && b.groupIds.length ? d.groups.filter((g) => b.groupIds.includes(g.id)) : d.groups;
     const list = (b.walletIds && b.walletIds.length)
@@ -415,7 +382,6 @@ const routes = {
     return eligibility.check({ ...b, wallets: list });
   },
 
-  /* --- activity feed --- */
   'GET /api/activity': async (b, q) => ({ items: activity.list(q.n), counts: activity.counts() }),
   'POST /api/activity/clear': async () => ({ ok: activity.clear() }),
   'GET /api/keystatus': async () => ({
@@ -423,8 +389,6 @@ const routes = {
     etherscan: keys.status('etherscanKey'), helius: keys.status('heliusKey'),
   }),
 
-  /* Live latency badge per key. Hits each provider once — slow on purpose,
-   * so the UI calls it on demand rather than on every settings render. */
   'POST /api/keyprobe': async (b) => keys.probe(b.fields),
   'POST /api/webhook/test': async (b) => {
     const url = (b && b.url) || store.readSettings().webhookUrl;
@@ -436,18 +400,12 @@ const routes = {
       return { ok: true, ms: Date.now() - t };
     } catch (e) { return { ok: false, error: String(e.message || e).slice(0, 80) }; }
   },
-  /* J-AIO Capture parity: browser extension forwards dapp tx to this endpoint.
-     No session needed (extension can't hold one) — loopback + X-JAIO-App only. */
   'POST /api/capture': async (b) => {
     const d = { ...(b || {}), ts: new Date().toISOString(), ip: 'loopback' };
     store.appendLog('capture.log', JSON.stringify(d));
     return { ok: true, ts: d.ts };
   },
 
-  /* --- home dashboard: one call for PnL + activity + key health --- */
-  /* The PnL crawl is slow (OpenSea events API, paged per wallet), so the home
-   * page reads the cached result written by POST /api/nft/pnl instead of
-   * recomputing on every 5s refresh. */
   'GET /api/home': async () => {
     let cached = null;
     try { cached = store.readSealed('pnl_cache', null); } catch { cached = null; }
@@ -462,13 +420,11 @@ const routes = {
     };
   },
 
-  /* --- X module --- */
   'POST /api/x/start': async (b) => xmodule.start(b),
   'POST /api/x/stop': async (b) => ({ ok: xmodule.stop(b.runId) }),
   'GET /api/x/runs': async () => xmodule.list(),
   'GET /api/x/status': async (b, q) => xmodule.status(q.runId),
 
-  /* --- logs --- */
   'GET /api/logs': async (b, q) => ({ lines: store.tailLog(q.name || 'mint-runs.log', Number(q.n || 200)) }),
 };
 
@@ -478,11 +434,6 @@ function redactSettings(s) {
   return out;
 }
 
-/* ---------------- input validation ----------------
- * Fund-moving routes take a destination straight from the request body. A typo
- * or a mangled address means coins land somewhere unrecoverable, so every
- * destination is checksum-validated here before any signing happens.
- */
 function addr(v, label) {
   if (v == null || v === '') throw new Error(`${label} is required`);
   try { return ethers.getAddress(String(v).trim()); }
@@ -495,7 +446,6 @@ function solAddr(v, label) {
   return s;
 }
 
-/* Positive decimal amount. Rejects NaN/Infinity/negatives/exponent notation. */
 function amount(v, label) {
   const s = String(v ?? '').trim();
   if (!/^\d+(\.\d+)?$/.test(s)) throw new Error(`${label} must be a positive decimal number`);
@@ -508,9 +458,6 @@ function ids(v, label) {
   return v.map(String);
 }
 
-/* Wallet picker shared by every route that acts on "the wallets I selected":
- * explicit ids win, otherwise fall back to whole groups, otherwise every EVM
- * wallet in the vault. */
 function walletSelection(b) {
   if (b.walletIds && b.walletIds.length) {
     return b.walletIds
@@ -523,17 +470,6 @@ function walletSelection(b) {
 
 const OPEN_ROUTES= new Set(['GET /api/state', 'POST /api/unlock', 'GET /api/chains', 'POST /api/capture']);
 
-/* ---------------- request guards ----------------
- * The server has no per-request auth, so a web page you visit in the same
- * browser could otherwise POST to 127.0.0.1:8899 and drain wallets (classic
- * CSRF), or a hostile DNS name could resolve to 127.0.0.1 and do the same
- * (DNS rebinding). Three cheap checks close both:
- *   1. Host must be a literal loopback host — kills DNS rebinding.
- *   2. Origin/Referer, when present, must be our own origin — kills CSRF
- *      from ordinary pages.
- *   3. Mutating API calls must carry X-JAIO-App, a header a cross-site
- *      request cannot set without a CORS preflight that we never approve.
- */
 const ALLOWED_HOSTS= new Set([
   `127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`,
 ]);
@@ -556,16 +492,11 @@ function guard(req) {
 }
 
 
-/* ---------------- server ---------------- */
 
 const SEC_HEADERS = {
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
   'referrer-policy': 'no-referrer',
-  // 'unsafe-inline' is required because the UI uses inline onclick handlers and
-  // style attributes. The value still matters: connect-src 'self' stops any
-  // exfiltration of keys to a remote host, and frame-ancestors/base-uri/form-action
-  // block framing and hijacked form posts.
   'content-security-policy': "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.seadn.io https://*.openseauserdata.com https://*.opensea.io https://*.arweave.net https://ipfs.io https://*.ipfs.dweb.link; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
 };
 
@@ -580,7 +511,6 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: bad }));
   }
 
-  // Idle auto-lock: a walked-away-from laptop should not stay unlocked forever.
   if (store.idleCheck()) {
     store.appendLog('security.log', 'auto-locked vault after idle timeout');
     sseSend({ kind: 'security', level: 'warn', msg: 'vault auto-locked (idle)' });
@@ -600,7 +530,6 @@ const server = http.createServer(async (req, res) => {
   if (u.pathname.startsWith('/api/')) {
     const handler = routes[key];
     if (!handler) return send(res, 404, { error: `no route ${key}` });
-    // Custom header requirement: unsettable cross-site without a preflight we never answer.
     if (req.method !== 'GET' && req.headers['x-jaio-app'] !== '1') {
       store.appendLog('security.log', `BLOCKED ${key} — missing X-JAIO-App header`);
       return send(res, 403, { error: 'missing X-JAIO-App header' });
@@ -623,8 +552,6 @@ const server = http.createServer(async (req, res) => {
       store.appendLog('audit.log', `${key} request=${audit(body)} query=${audit(q)}`);
       const out = await handler(body, q);
       store.appendLog('audit.log', `${key} result=${audit(out)}`);
-      // keyprobe payload is pre-masked (keys.js mask()) and keyed by secret field
-      // names — jsonSafe would redact the whole result to '***'. Send it raw.
       const raw = key === 'POST /api/keyprobe';
       return send(res, 200, out ?? { ok: true }, raw);
     } catch (e) {
@@ -633,7 +560,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // static
   const p = u.pathname === '/' ? '/index.html' : u.pathname;
   const file = path.resolve(PUB, '.' + path.posix.normalize(p));
   if (file !== PUB && !file.startsWith(PUB + path.sep)) {
@@ -648,9 +574,6 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-/* Crash guards. A background mint run that rejects unhandled would
- * otherwise kill the process mid-flight (Node 15+ exits on unhandled
- * rejection), losing every in-progress run. Log and keep serving instead. */
 process.on('unhandledRejection', (e) => {
   const msg = String(e?.stack || e?.message || e).slice(0, 400);
   store.appendLog('security.log', `unhandledRejection: ${msg}`);
@@ -662,7 +585,6 @@ process.on('uncaughtException', (e) => {
   sseSend({ kind: 'security', level: 'fail', msg: `internal error: ${String(e?.message || e).slice(0, 160)}` });
 });
 
-/* Zeroize the master key on shutdown instead of leaving it in a core dump. */
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     try { store.lock(); store.appendLog('security.log', `vault locked (${sig} shutdown)`); } catch { /* already down */ }

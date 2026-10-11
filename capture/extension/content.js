@@ -1,4 +1,3 @@
-// Content script (isolated world) — forwards jaio capture messages to J-AIO.
 (() => {
   window.addEventListener('message', (ev) => {
     if (!ev.data || ev.data.__jaio !== true) return;

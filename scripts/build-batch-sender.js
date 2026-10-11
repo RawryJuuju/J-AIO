@@ -1,5 +1,4 @@
 'use strict';
-/* One-shot: compile contracts/BatchNftSender.sol -> src/batchSender.artifact.json */
 const fs = require('fs');
 const path = require('path');
 const solc = require('solc');

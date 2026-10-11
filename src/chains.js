@@ -1,5 +1,4 @@
 'use strict';
-/* EVM chain registry — 19 chains (J-AIO parity + Robinhood Chain). */
 
 const CHAINS = {
   ethereum:  { id: 1,        name: 'Ethereum',   symbol: 'ETH',  explorer: 'https://etherscan.io',              alchemy: 'eth-mainnet',      osSlug: 'ethereum',  weth: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', rpcs: ['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org', 'https://1rpc.io/eth', 'https://rpc.ankr.com/eth'] },
@@ -24,7 +23,6 @@ const CHAINS = {
   sepolia:   { id: 11155111, name: 'Sepolia',    symbol: 'ETH',  explorer: 'https://sepolia.etherscan.io',      alchemy: 'eth-sepolia',      osSlug: 'sepolia',   weth: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', rpcs: ['https://ethereum-sepolia-rpc.publicnode.com'], hidden: true, testnet: true },
 };
 
-/* User-added chains live in data/custom_chains.json (plain — no secrets). */
 function customChains() {
   try {
     const store = require('./store');

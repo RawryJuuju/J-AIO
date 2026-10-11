@@ -1,9 +1,5 @@
 'use strict';
-/* Infra pages: Proxies, RPC groups, Chains, Settings, Logs */
 
-/* =========================================================
-   PROXIES
-   ========================================================= */
 page('proxies', {
   label: 'Proxies', group: 'Infra', icon: 'proxy',
   render(el) {
@@ -118,9 +114,6 @@ socks5://user:pass@1.2.3.4:1080"></textarea>
   },
 });
 
-/* =========================================================
-   RPC
-   ========================================================= */
 page('rpc', {
   label: 'RPC Endpoints', group: 'Infra', icon: 'rpc',
   render(el) {
@@ -235,9 +228,6 @@ https://rpc.ankr.com/eth"></textarea>
   },
 });
 
-/* =========================================================
-   CHAINS
-   ========================================================= */
 page('chains', {
   label: 'Chains', group: 'Infra', icon: 'chains',
   render(el) {
@@ -318,9 +308,6 @@ page('chains', {
   },
 });
 
-/* =========================================================
-   SETTINGS
-   ========================================================= */
 page('settings', {
   label: 'Settings', group: 'Infra', icon: 'settings',
   render(el) {
@@ -383,8 +370,6 @@ page('settings', {
         </div>
       </div>`;
 
-    /* Key pool panel. Each provider gets one textarea (a pool, newline or comma
-       separated) plus a live per-key latency badge from /api/keyprobe. */
     const POOLS = [
       { field: 'openseaKey', label: 'OpenSea', hint: 'floor, offers, listings, rarity', why: 'Rate limits at ~4 rps per key. Add several for bulk PnL and WL sweeps.' },
       { field: 'etherscanKey', label: 'Etherscan V2', hint: 'ABI fetch, all chains', why: 'Optional. Without a key ABI fetch falls back to a shared quota.' },
@@ -394,17 +379,11 @@ page('settings', {
 
     const BADGE = { good: 'ok', slow: 'warn', limited: 'warn', bad: 'fail', dead: 'fail', unknown: 'mut' };
 
-    /* Count keys straight from a textarea's text. /api/keystatus only knows what
-       is saved, so before this the pill read "undefined keys" whenever a field
-       held an unsaved value. Now the pill always reflects the visible text. */
     function countKeys(raw) {
       return String(raw || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean).length;
     }
     function keyLabel(n) { return `${n} key${n === 1 ? '' : 's'}`; }
 
-    /* Unsaved-changes tracking. Keys used to save only via the Behaviour card's
-       "Save settings" button further down the page, which is not discoverable
-       from the API keys card, so pasted keys were silently lost on reload. */
     let keysSnapshot = '';
     let keysAutoTimer = null;   // debounce for paste-to-save-and-probe
     function keysNow() { return POOLS.map((p) => ($('kv-' + p.field) || {}).value || '').join('\u0000'); }
@@ -416,10 +395,6 @@ page('settings', {
       return dirty;
     }
 
-    /* Persist only the key-pool textareas that the user actually touched since
-       the last render. Untouched fields stay out of the request body, so a
-       saved (masked, '***') key is never wiped by an unrelated edit — which is
-       exactly what "Save keys" used to do to every untouched pool. */
     let keysDirtyFields = new Set();
     async function saveKeysFields() {
       const body = {};
@@ -456,8 +431,6 @@ page('settings', {
         </div>`;
       }).join('');
       qa('#stKeys [data-probe]').forEach((b) => { b.onclick = () => probeFields([b.dataset.probe]); });
-      /* Live pill count + dirty flag as you type, and Ctrl/Cmd+Enter saves from
-         inside the textarea. */
       POOLS.forEach((p) => {
         const ta = $('kv-' + p.field);
         if (!ta) return;
@@ -466,8 +439,6 @@ page('settings', {
           const c = $('kc-' + p.field);
           if (c) c.textContent = keyLabel(countKeys(ta.value));
           syncKeysDirty();
-          /* Paste-to-save-and-probe: 700ms after the last keystroke the pool is
-             persisted and the fresh keys are tested immediately. */
           clearTimeout(keysAutoTimer);
           keysAutoTimer = setTimeout(async () => {
             if (!syncKeysDirty()) return;   // nothing changed since last save
@@ -514,7 +485,6 @@ page('settings', {
     async function load() {
       const s = await api('/settings');
       S.settings = s;
-      /* Server-stored theme applies only when this browser has no local choice yet */
       try {
         if (!localStorage.getItem('jaio_theme') && (s.theme === 'light' || s.theme === 'night')) applyTheme(s.theme);
       } catch (e) { /* private mode */ }
@@ -543,8 +513,6 @@ page('settings', {
       b.disabled = false;
     };
 
-    /* Save keys button in the API keys card — was never wired, so pasted keys
-       could only be persisted from the Behaviour card below. */
     $('stSaveKeys').onclick = async () => {
       try { await saveKeysFields(); ok('Keys saved'); }
       catch (e) { err('Save failed', e.message); }
@@ -559,8 +527,6 @@ page('settings', {
         if (v === '***') return;                   // untouched redacted secret
         body[key] = ['autoTipMultiplier', 'ethUsd', 'idleLockMinutes'].includes(key) ? Number(v) : v;
       });
-      /* Pool textareas write the plural field and clear the legacy singular, so
-         a key is never stored twice under two names. */
       POOLS.forEach((p) => {
         const raw = $('kv-' + p.field).value;
         if (raw.trim() === '***') return;
@@ -584,8 +550,6 @@ page('settings', {
       'All decrypted keys are dropped from memory. Active runs keep going but new signing will fail until you unlock again.',
       async () => { await api('/lock', {}); showLock('Locked. Enter password to unlock.'); }, 'Lock now');
 
-    /* Theme switcher (night / light) — instant apply, localStorage primary,
-       mirrored to server settings as a backup. */
     function syncThemeSeg() {
       const cur = currentTheme();
       qa('#thSeg button').forEach((b) => b.classList.toggle('on', b.dataset.th === cur));
@@ -603,9 +567,6 @@ page('settings', {
   },
 });
 
-/* =========================================================
-   LOGS
-   ========================================================= */
 page('logs', {
   label: 'Logs', group: 'Infra', icon: 'logs',
   render(el) {

@@ -1,5 +1,4 @@
 'use strict';
-/* Wallets & Fund Manager — EVM / SOL / BTC */
 
 let WK = 'evm';                    // active kind
 let WG = '';                       // active group id ('' = all)
@@ -75,7 +74,6 @@ page('wallets', {
         </div>
       </div>`;
 
-    /* ---------- kind tabs ---------- */
     qa('#wTabs button').forEach((b) => {
       b.onclick = () => {
         qa('#wTabs button').forEach((x) => x.classList.toggle('on', x === b));
@@ -87,7 +85,6 @@ page('wallets', {
       };
     });
 
-    /* ---------- group cards ---------- */
     function renderCards() {
       const gs = wgroups();
       const all = wlist().length;
@@ -119,7 +116,6 @@ page('wallets', {
       });
     }
 
-    /* ---------- table ---------- */
     function visible() {
       const q = WQ.trim().toLowerCase();
       return wlist().filter((w) => (!WG || w.groupId === WG)
@@ -216,7 +212,6 @@ page('wallets', {
       renderCards(); renderTable();
     };
 
-    /* ---------- group ops ---------- */
     function newGroup() {
       modal(`<h3>New ${WK.toUpperCase()} group</h3><label class="f">Name</label><input id="ngName" placeholder="main">
         <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" id="ngGo">Create</button></div>`);
@@ -247,7 +242,6 @@ page('wallets', {
         }, 'Delete group');
     }
 
-    /* ---------- add menu ---------- */
     $('wAdd').onclick = () => {
       modal(`<h3>Add ${WK.toUpperCase()} wallets</h3>
         <div class="grid g2">
@@ -315,7 +309,6 @@ page('wallets', {
       };
     }
 
-    /* ---------- funds menu ---------- */
     $('wFunds').onclick = () => {
       modal(`<h3>Manage funds</h3>
         <div class="grid g3">
@@ -329,7 +322,6 @@ page('wallets', {
       $('fmCon').onclick = () => { closeModal(); consolidateModal(); };
     };
 
-    /* ---------- tools menu (EVM) ---------- */
     $('wTools').onclick = () => {
       modal(`<h3>Wallet tools</h3>
         <div class="grid g2">
@@ -368,7 +360,6 @@ page('wallets', {
       };
     }
 
-    /* ---------- selection actions ---------- */
     $('wCopyAddr').onclick = () => {
       const list = wlist().filter((w) => WSEL.has(w.id)).map((w) => w.address);
       if (!list.length) return;
@@ -401,7 +392,6 @@ page('wallets', {
             await navigator.clipboard.writeText(r.csv);
             const n = WSEL.size;
             warn('Keys on clipboard', `${n} key(s) — auto-clearing in 60s`);
-            // best-effort auto-wipe; only fires while this tab stays focused
             clearTimeout(window.__jaioClipTimer);
             window.__jaioClipTimer = setTimeout(() => {
               navigator.clipboard.writeText('').then(
@@ -439,7 +429,6 @@ page('wallets', {
         for (const id of [...WSEL]) { try { await del('/wallets', { kind: WK, id }); done++; } catch { /* skip */ } }
         WSEL.clear(); await reload(); warn('Removed', `${done} wallets`);
       };
-      // bulk deletes are irreversible, so make large ones require typing
       if (n >= 10) confirmTyped('Remove wallets?', body, `delete ${n}`, run, `Remove ${n} wallets`);
       else confirmBox('Remove wallets?', body, run, 'Remove');
     };
@@ -452,7 +441,6 @@ page('wallets', {
         }, 'Remove');
     }
 
-    /* ---------- balances ---------- */
     $('wBal').onclick = async () => {
       const rows = visible();
       if (!rows.length) return;
@@ -499,7 +487,6 @@ async function wRenameOne(id, name) {
   };
 }
 
-/* ---------- fund manager modals ---------- */
 
 function walletSelect(id, kind, selId) {
   return `<select id="${id}">${(S.wallets[kind || WK] || []).map((w) => `<option value="${w.id}"${w.id === selId ? ' selected' : ''}>${esc(w.name)} · ${esc(short(w.address, 8))}</option>`).join('')}</select>`;

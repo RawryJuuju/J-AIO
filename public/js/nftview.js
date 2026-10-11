@@ -1,11 +1,4 @@
 'use strict';
-/* NFT Manager — one collection, my wallets, live market data.
- *
- * The inventory page answers "what do I own everywhere". This page answers the
- * question you actually ask before selling: for THIS collection, which of my
- * wallets hold what, what is each token's rarity, and is it already listed. Header carries the collection identity
- * and floor so every number in the table has context.
- */
 
 page('nftview', {
   label: 'Collection Manager', group: 'NFT', icon: 'col',
@@ -49,13 +42,7 @@ page('nftview', {
     let data = null;
     const CVSEL = new Set();
     let viewMode = 'grid';   // grid | list
-    /* Market toggle: listing prices + rarity are the expensive part of a load
-     * (collection-wide listings page + per-token rarity). Off = inventory and
-     * floor only, which is dramatically faster on big bags. */
     let wantMarket = true;
-    /* Collection payment currency — OpenSea stats report floor_price_symbol
-     * (ETH on most chains, USDG on some Robinhood collections, …). USD rate:
-     * ETH family uses S.ethUsd, known stablecoins peg 1:1, else no USD tag. */
     const STABLE_USD = { usdg: 1, usdc: 1, usdt: 1, dai: 1, usd1: 1, pyusd: 1, frax: 1, usds: 1 };
     const curSymbol = () => (data && data.floorSymbol) || 'ETH';
     const curIsEth = () => /^w?eth$/i.test(curSymbol());
@@ -71,8 +58,6 @@ page('nftview', {
       return S.wallets.evm.filter((w) => !g || w.groupId === g).map((w) => w.id);
     }
 
-    /* Collection header: identity on the left, the four numbers that decide
-       whether to sell on the right. */
     function head() {
       if (!data) { $('cvHead').innerHTML = ''; return; }
       const c = S.chains.find((x) => x.key === data.chain);
@@ -100,8 +85,6 @@ page('nftview', {
       qa('#cvHead [data-copy]').forEach((b) => { b.onclick = () => copy(b.dataset.copy); });
     }
 
-    /* Rarity tiers — share-of-supply buckets, J-AIO-style. The header chips
-       carry the counts; the badge class maps to the tier colour. */
     const TIERS = [
       { name: 'Legendary', label: 'Top 1%', color: '#F6A219', max: 0.01 },
       { name: 'Epic', label: 'Top 10%', color: '#A461E4', max: 0.1 },
@@ -118,8 +101,6 @@ page('nftview', {
       return t ? t.toLowerCase() : 'unk';
     }
 
-    /* Rarity filter chips — colored boxes with per-tier counts. Empty set =
-       no filter; tokens without a rarity rank are hidden while one is on. */
     const RFILT = new Set();
     function rarf() {
       const el = $('cvRarf'); if (!el) return;
@@ -137,9 +118,6 @@ page('nftview', {
       }; });
     }
 
-    /* OpenSea-style card grid: image first, checkbox overlay, price rows in
-       ETH + USD. Clicking anywhere on a card toggles selection; List / Accept
-       live on the bottom bar and only exist while something is selected. */
     function card(n) {
       const tid = String(n.tokenId);
       const tier = rarityTier(n.rarityRank);
@@ -196,7 +174,6 @@ page('nftview', {
         syncSel();
         return;
       }
-      /* drop selections that no longer exist after a refresh */
       const live = new Set(data.rows.map((n) => String(n.tokenId)));
       [...CVSEL].forEach((t) => { if (!live.has(t)) CVSEL.delete(t); });
       const tv = viewMode === 'list';
@@ -224,13 +201,8 @@ page('nftview', {
     };
     $('cvSelClear').onclick = () => { CVSEL.clear(); syncSel(); };
 
-    /* ---------- bulk list ---------- */
     $('cvList').onclick = () => {
       const rows = selRows(); if (!rows.length) return;
-      /* Already-listed tokens are NOT skipped: they get relisted — existing
-       * listing cancelled on-chain first, then the new price (higher or
-       * lower) is signed in. Leaving the old order up would keep the old
-       * price buyable. */
       const unlisted = rows.filter((r) => r.listing == null);
       const relists = rows.length - unlisted.length;
       const targets = rows;
@@ -270,8 +242,6 @@ page('nftview', {
         <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" id="blGo">Review listing</button></div>`);
       const creatorBps = (data.creatorFees || []).reduce((s, x) => s + Number(x.bps || 0), 0);
       const creatorPct = creatorBps / 100;
-      /* Price <-> USD fields are two-way synced; the collection currency is
-         the source of truth (that's what gets signed), USD mirrors it live. */
       const priceEth = () => {
         const v = Number($('blP').value);
         return (!v || isNaN(v)) ? 0 : v;
@@ -336,11 +306,6 @@ page('nftview', {
         const b = $('blGo'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Listing';
         const common = { chain: data.chain, contract: data.address, slug: data.slug || null, durationDays: Number($('blD').value || 7), creatorFees: creatorEnforced ? creatorFees : [] };
         try {
-          // Direction matters (orders are zone-gated, orderType=2):
-          //  drop  → free: sign the new lower order, OpenSea's zone invalidates
-          //          the old one offchain. No tx.
-          //  raise → must cancel on-chain first: the old cheaper order stays a
-          //          valid Seaport order anyone could fill otherwise.
           let skips = 0;
           const raising = [], listing = [];
           for (const n of targets) {
@@ -363,8 +328,6 @@ page('nftview', {
           if (todo.length) {
             $('blProg').textContent = `Listing ${todo.length} NFT(s)…`;
             let r = await api('/nft/list-batch', { ...common, items: todo });
-            // Safety net (same as old flow): OS rejected a no-cancel drop as
-            // duplicate → cancel those + retry once.
             const dupes = (r || []).map((x, i) => ({ x, i })).filter(({ x }) => x && x.error && /already|exist|listed|duplicate/i.test(x.error));
             if (dupes.length) {
               $('blProg').textContent = `Re-cancelling ${dupes.length} duplicate(s)…`;
@@ -382,9 +345,6 @@ page('nftview', {
       };
     };
 
-    /* ---------- bulk unlist (Seaport cancel on-chain) ----------
-       One /api/nft/cancel per token, sequential. Gas-only fee per tx; safe to
-       run on selected listed rows or Select-all. */
     $('cvUnlist').onclick = () => {
       const rows = selRows().filter((r) => r.listing != null);
       if (!rows.length) return warn('Select listed NFTs first');
@@ -408,7 +368,6 @@ page('nftview', {
       };
     };
 
-    /* ---------- bulk list ---------- */
     async function load(silent) {
       const input = $('cvIn').value.trim();
       if (!input) return warn('Paste a contract, slug, or OpenSea link');
@@ -430,10 +389,6 @@ page('nftview', {
       } finally { if (!silent) { b.disabled = false; b.textContent = 'Load'; } }
     }
 
-    /* Reveal watch — J-AIO's Viewer reveal monitor, built on the 60s
-       auto-refresh already running here. Snapshots each token's image when
-       armed; any image change on a later refresh counts as that token being
-       revealed. Read-only, no extra API calls, no rate-limit cost. */
     const REV = { on: false, snap: null, revealed: new Set(), total: 0 };
     function watchUI() {
       const b = $('cvWatch'); if (!b) return;
@@ -478,13 +433,6 @@ page('nftview', {
       watchUI();
     };
 
-    /* ---------- collection offers / accept offer (OpenSea-style) ----------
-     * On-demand only (never part of the load path, so it costs nothing until
-     * clicked). Entry points: the toolbar "Offers" button (all held tokens)
-     * and the selection bar "Accept offer" button (selected tokens only).
-     * The checkout runs the SAME verification server-side that the real accept
-     * runs (preview endpoint), so displayed fees/earnings are exactly what
-     * gets signed — no estimates. */
     const fmtExp = (ts) => {
       const s = Number(ts) - Math.floor(Date.now() / 1000);
       if (!ts || !Number.isFinite(s) || s <= 0) return '—';
@@ -492,8 +440,6 @@ page('nftview', {
       if (s < 86400) return `in ${(s / 3600).toFixed(1)} h`;
       return `in ${Math.floor(s / 86400)} day${Math.floor(s / 86400) === 1 ? '' : 's'}`;
     };
-    /* Criteria offers encode targeted token ids as base64 of concatenated
-     * 32-byte big-endian ints. Best-effort decode — null means "any token". */
     function criteriaTokenIds(criteria) {
       try {
         const enc = criteria && (criteria.encodedTokenIds || criteria.encoded_token_ids);
@@ -516,8 +462,6 @@ page('nftview', {
     const payRate = () => (payIsEth() ? S.ethUsd : STABLE_USD[(PAY.symbol || '').toLowerCase()] ?? null);
     const payUsd = (v) => { const r = payRate(); return (r && v != null) ? `<span class="uusd">$${num(v * r, 2)}</span>` : ''; };
 
-    /* Rebuild the offers modal shell from the cached OF (no refetch) — used
-     * by the checkout's Back button, since modal() replaces the whole box. */
     function offersShell() {
       modal(`<h3>${icon('offer')} Offers — ${esc(data.name || data.slug)}</h3>
         <div id="ofBody"></div>
@@ -575,10 +519,6 @@ page('nftview', {
       const ab = $('ofAuto'); if (ab) ab.onclick = () => autoAccept(ab);
     }
 
-    /* BULK accept for multi-item offers: sells all your matching NFTs in ONE
-     * API call — the server prepares every fill in parallel, dedupes approvals,
-     * pipelines nonces and broadcasts all fills at once. Per-item errors are
-     * reported individually; nothing blocks anything else. */
     async function sellAll(o, rows, btn) {
       const limit = Math.min(rows.length, Math.max(1, Number(o.quantity) || 1));
       const queue = rows.slice(0, limit);
@@ -608,13 +548,6 @@ page('nftview', {
       CVSEL.clear(); load(true);
     }
 
-    /* AUTO ACCEPT — BULK: walks every NFT in the pool (the selection, or all
-     * held tokens), matches each one to the BEST funded offer that can take it,
-     * then accepts ALL matches in ONE bulk call (server-side parallel prep +
-     * pipelined nonces + parallel broadcast). Items no offer can take are
-     * reported as "no offer" — nothing is skipped silently. Dust bids (<1% of
-     * floor) are excluded unless the checkbox is on. Offer capacity is reserved
-     * optimistically at match time. */
     async function autoAccept(btn) {
       if (!OF.length) { warn('No offers available on this collection right now'); return; }
       const includeDust = !!($('ofDust') && $('ofDust').checked);
@@ -697,9 +630,6 @@ page('nftview', {
       if (sold.length) { CVSEL.clear(); load(true); }
     }
 
-    /* OpenSea-style accept: item card, fee split, "You will receive", one button.
-     * Multi-item (collection) offers: each accept is a Seaport partial fill —
-     * sell one of your NFTs at the per-item price; "Sell all" loops the rest. */
     function checkoutModal(o) {
       const ids = criteriaTokenIds(o.criteria);
       const rows = ids ? OFROWS.filter((r) => ids.includes(String(r.tokenId))) : OFROWS;
@@ -792,8 +722,6 @@ page('nftview', {
       openOffersModal(rows);
     };
 
-    /* Auto-refresh: floor, owner and listing follow OpenSea every 60s.
-       Silent — no spinner/toast, selection survives. Killed on page leave. */
     const AUTOREFRESH_MS = 60000;
     let autoTimer = null;
     function startAuto() {
@@ -889,11 +817,7 @@ page('nftview', {
 
 function acceptModal(n, data) { /* superseded by bulk accept on the selection bar */ }
 
-/* ---------- PnL card ---------- */
 
-/* A shareable card, the way J-AIO does it: Minted / Sold / Bought / Holding on
- * one row, net underneath, crypto or USD. Rendered to canvas for PNG download
- * so it can be dropped straight into a tweet. */
 function pnlCardModal(chain, input, walletIds) {
   modal(`<h3>PnL card</h3>
     <div class="row mb8" style="gap:8px;align-items:center;flex-wrap:wrap">
@@ -914,8 +838,6 @@ function pnlCardModal(chain, input, walletIds) {
     </div>`, true);
 
   let card = null, unit = 'crypto';
-  /* Custom card image (dataURL). Any aspect ratio works — preview uses CSS
-     cover+center, the PNG render does the same math on canvas. */
   let bgUrl = null;
 
   function applyBg() {
@@ -948,8 +870,6 @@ function pnlCardModal(chain, input, walletIds) {
   $('pcImgClear').onclick = () => { bgUrl = null; $('pcImgUrl').value = ''; applyBg(); };
 
 
-  /* Three-way toggle: ETH -> USD -> IDR -> ETH. The button label names the
-   * NEXT unit so one click always lands where it says. */
   const money = (v) => {
     if (unit === 'usd' && card && card.ethUsd != null) return '$' + num(v * card.ethUsd, 2);
     if (unit === 'idr' && card && card.ethUsd != null && card.usdIdr != null) {
@@ -989,7 +909,6 @@ function pnlCardModal(chain, input, walletIds) {
   }
 
   $('pcUnit').onclick = () => {
-    /* IDR is only in the cycle when we actually have a USD→IDR rate. */
     const cycle = card && card.usdIdr != null ? ['crypto', 'usd', 'idr'] : ['crypto', 'usd'];
     unit = cycle[(cycle.indexOf(unit) + 1) % cycle.length];
     const next = cycle[(cycle.indexOf(unit) + 1) % cycle.length];
@@ -1007,16 +926,12 @@ function pnlCardModal(chain, input, walletIds) {
     ].join('\n'));
   };
 
-  /* Canvas render rather than an HTML-to-image dependency: the card is a fixed
-     layout, so drawing it directly is smaller and has no network cost. */
   $('pcPng').onclick = async () => {
     if (!card) return;
     const W = 1000, H = 520, cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
     const g = cv.getContext('2d');
     if (bgUrl) {
-      /* Custom image: CENTER-CROP to the card's ratio (cover), never stretch —
-         a 1:1 picture loses its left/right middles, a tall one its top/bottom. */
       try {
         const im = await new Promise((res, rej) => {
           const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('decode failed')); i.src = bgUrl;

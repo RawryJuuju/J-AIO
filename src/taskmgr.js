@@ -1,5 +1,4 @@
 'use strict';
-/* Task Manager backend — unifies runs across Mint, Social, and Sniper. */
 
 const mint = require('./mint');
 const sniper = require('./sniper');

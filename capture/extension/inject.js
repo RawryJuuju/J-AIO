@@ -1,8 +1,6 @@
-// Runs in the PAGE world — hooks window.ethereum before the dapp initializes.
 (() => {
   const JAIOCAP = '__jaio_capture__';
   if (window[JAIOCAP] || !window.ethereum) {
-    // no provider yet — retry on ethereum#initialized (Metamask injects async)
     if (!window.ethereum) {
       const boot = () => setTimeout(() => { if (window.ethereum) hook(); }, 100);
       if (window.addEventListener) window.addEventListener('ethereum#initialized', boot, { once: true });

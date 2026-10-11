@@ -1,5 +1,4 @@
 'use strict';
-/* Social page — X batch actions + custom form submit engine */
 
 page('xmod', {
   label: 'X Engagement', group: 'Identity', icon: 'x',

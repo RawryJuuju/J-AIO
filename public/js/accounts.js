@@ -1,5 +1,4 @@
 'use strict';
-/* Accounts — group cards, searchable table, bulk connect / check / unlink, proxies */
 
 let AG = '';                 // active group id ('' = all)
 let AQ = '';                 // search query
@@ -46,7 +45,6 @@ page('accounts', {
         </div>
       </div>`;
 
-    /* ---------- data ---------- */
     function groups() { return S.agroups || []; }
     function all() { return S.accounts || []; }
     function inGroup() { return all().filter((a) => !AG || a.group === AG); }
@@ -61,14 +59,12 @@ page('accounts', {
     async function reload() {
       const r = await api('/accounts');
       S.accounts = r.accounts; S.agroups = r.groups;
-      // drop selections that no longer exist
       const live = new Set(S.accounts.map((a) => a.id));
       [...ASEL].forEach((id) => { if (!live.has(id)) ASEL.delete(id); });
       if (AG && !S.agroups.some((g) => g.id === AG)) AG = '';
       renderCards(); renderTable();
     }
 
-    /* ---------- group cards ---------- */
     function renderCards() {
       const card = (id, name, count) => `<div class="gcard${AG === id ? ' on' : ''}" data-g="${esc(id)}" tabindex="0" role="button" aria-pressed="${AG === id}">
         <div class="gn">${esc(name)}</div>
@@ -99,14 +95,10 @@ page('accounts', {
       });
     }
 
-    /* ---------- table ---------- */
     function chainChips(a) {
       const c = (label, on) => `<span class="chip ${on ? 'on' : 'off'}" title="${label} ${on ? 'linked' : 'not linked'}">${label}</span>`;
       return `<span class="chips">${c('EVM', !!a.address)}<span class="s">/</span>${c('SOL', !!a.solAddress)}<span class="s">/</span>${c('BTC', !!a.btcAddress)}</span>`;
     }
-    /* Probe state -> colour + label. Green only for a verified-live account.
-       Red covers suspended / locked / dead token. Amber = probed but inconclusive
-       (rate limit, network) so a temporary blip is not read as a dead account. */
     const STATE_META = {
       ok: { cls: 'ok', dot: 'ok', tag: '', tip: 'Live' },
       suspended: { cls: 'bad', dot: 'fail', tag: 'SUSPENDED', tip: 'Account suspended' },
@@ -120,7 +112,6 @@ page('accounts', {
       if (!s) return null;
       return s.state || (s.ok ? 'ok' : 'error');
     }
-    /* handle + probe state cell. `s` is the raw status object for that service. */
     function credCell(handle, hasToken, s, extra) {
       if (!handle && !hasToken) return '<span class="cred"><span class="none">—</span></span>';
       const state = stOf(s);
@@ -138,7 +129,6 @@ page('accounts', {
         ${extra ? `<span class="xmeta">${esc(extra)}</span>` : ''}
       </span>`;
     }
-    /* follower count next to a live X handle, compacted (12.4k) */
     function fmtK(n) {
       if (n == null) return '';
       return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
@@ -236,7 +226,6 @@ page('accounts', {
       const n = sel().length;
       $('aSelBar').classList.toggle('hide', n === 0);
       $('aSelCount').textContent = `${n} selected`;
-      // count on the destructive buttons so the blast radius is visible before the click
       $('aBulkDisc').innerHTML = `${icon('unlink')} Bulk Remove${n ? ` (${n})` : ''}`;
       $('aDel').innerHTML = `${icon('trash')} Delete${n ? ` (${n})` : ''}`;
       const m = document.querySelector('main');
@@ -255,7 +244,6 @@ page('accounts', {
     $('aSelClear').onclick = () => { ASEL.clear(); renderTable(); };
     $('aQ').oninput = () => { AQ = $('aQ').value; renderTable(); };
 
-    /* ---------- groups ---------- */
     function newGroup() {
       modal(`<h3>New account group</h3>
         <label class="f">Name</label><input id="ngN" placeholder="main-105">
@@ -293,7 +281,6 @@ page('accounts', {
         }, 'Delete group');
     }
 
-    /* ---------- row ops ---------- */
     function delOne(id, name) {
       confirmBox('Remove account?', `Stored credentials for <b>${esc(name)}</b> are deleted. The wallet itself stays.`, async () => {
         try { await api('/accounts/remove', { id }); ASEL.delete(id); await reload(); warn('Removed'); }
@@ -301,8 +288,6 @@ page('accounts', {
       }, 'Remove');
     }
 
-    /* Turn a probe result map ({x:{...},discord:{...}}) into one toast.
-       Severity: any suspended/locked/bad_token -> error, any warn -> warn, else ok. */
     function reportProbe(probe) {
       const LBL = { x: 'X', discord: 'Discord', gmail: 'Gmail' };
       const keys = Object.keys(probe || {});
@@ -384,7 +369,6 @@ page('accounts', {
       };
     }
 
-    /* ---------- toolbar ---------- */
     $('aAdd').onclick = async () => {
       const g = AG || (groups()[0] || {}).id;
       if (!g) return warn('Create a group first');
@@ -446,7 +430,6 @@ page('accounts', {
       };
     };
 
-    /* ---------- auth probes ---------- */
     async function runProbe(ids, which, label, btn) {
       const old = btn.innerHTML;
       btn.innerHTML = '<span class="spin"></span>';
@@ -482,7 +465,6 @@ page('accounts', {
       runProbe(ids, 'all', 'Bulk check', $('aBulkCheck'));
     };
 
-    /* ---------- bulk connect ---------- */
     $('aBulkConn').onclick = () => {
       const rows = sel();
       if (!rows.length) return warn('Select accounts first');
@@ -510,7 +492,6 @@ page('accounts', {
           closeModal(); await reload();
           const res = r.results || [];
           if (!res.length) return ok('Connected', `${r.updated} row(s)`);
-          // Roll the per-row verdicts into one line: live / suspended / locked / bad / warn.
           const tally = { ok: 0, suspended: 0, locked: 0, bad_token: 0, other: 0 };
           res.forEach((row) => {
             const states = ['x', 'discord', 'gmail'].filter((k) => row[k]).map((k) => row[k].state || (row[k].ok ? 'ok' : 'error'));
@@ -529,7 +510,6 @@ page('accounts', {
       };
     };
 
-    /* ---------- bulk unlink / delete ---------- */
     $('aBulkDisc').onclick = () => {
       const rows = sel();
       if (!rows.length) return warn('Select accounts first');

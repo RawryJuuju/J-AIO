@@ -1,6 +1,4 @@
 'use strict';
-/* Mint engine — pre-sign → fire, spam/execute modes, Flashbots bundles,
- * timestamp arming, on-chain mintOpen monitor, per-wallet error classification. */
 const { ethers } = require('ethers');
 const store = require('./store');
 const chainsMod = require('./chains');
@@ -20,9 +18,6 @@ const runs = new Map();   // runId -> state
 
 function nid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-/* Token id out of a mint receipt: first Transfer(from=0x0) log whose `to` is a
- * topic (ERC721) — ERC1155 uses TransferSingle with the id in data, handled by
- * the second branch. Returns null when nothing matches. */
 const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
 const SINGLE_TOPIC = ethers.id('TransferSingle(address,address,address,uint256,uint256)');
 function tokenIdFromReceipt(rec) {
@@ -52,7 +47,6 @@ function emit(runId, ev) {
   bus.emit('event', { runId, t: Date.now(), ...ev });
 }
 
-/* ---------------- error classification ---------------- */
 
 const STOP_ALL = 'stop-all';
 const SKIP = 'skip';
@@ -73,24 +67,7 @@ function classify(err) {
   return { action: SKIP, reason: String(err?.shortMessage || err?.message || err).slice(0, 140) };
 }
 
-/* ---------------- gas resolution ---------------- */
 
-/* Gas presets. Each preset is a pair of multipliers applied to the LIVE fee data:
- *
- *   tipMul  — how hard we outbid the tip auction. This is what actually decides
- *             inclusion order inside a block, so it is the "gacor" knob.
- *   feeMul  — headroom on maxFeePerGas over the current base fee. This is NOT
- *             what you pay: EIP-1559 refunds (maxFee - base - tip), so extra
- *             headroom is free insurance against a base-fee spike between
- *             pre-sign and inclusion. It only caps how high we are willing to go.
- *   minTip  — floor so a chain reporting a near-zero tip (common on L2s) still
- *             gets a tip that any builder will bother to include.
- *
- * safe  = land it, don't overpay. Survives ~2.5x base fee growth.
- * fast  = contested mint, still bounded.
- * gacor = hot mint / gas war. Wide headroom + heavy tip so we are near the top
- *         of the block. Costs more ONLY when others also bid high.
- */
 const GAS_PRESETS = {
   safe:  { tipMul: 1.5, feeMul: 2.5, minTipGwei: 0.05 },
   fast:  { tipMul: 3,   feeMul: 3,   minTipGwei: 0.5 },
@@ -99,8 +76,6 @@ const GAS_PRESETS = {
 
 async function resolveGas(chainKey, cfg) {
   const preset = GAS_PRESETS[cfg.gasPreset] || null;
-  // A manual tipMultiplier still wins over the preset's tipMul so the advanced
-  // fields on the UI stay authoritative.
   const auto = await wallets.feeData(chainKey, {
     tipMultiplier: cfg.tipMultiplier || (preset ? preset.tipMul : null),
   });
@@ -112,15 +87,12 @@ async function resolveGas(chainKey, cfg) {
     const minTip = ethers.parseUnits(String(preset.minTipGwei), 'gwei');
     if (!cfg.priorityFee && tip < minTip) tip = minTip;
     if (!cfg.maxFee) {
-      // feeData() already applied a 2x base-fee cushion; scale from the raw base
-      // fee instead so feeMul means what it says.
       const base = auto.gasPrice ?? (auto.maxFeePerGas / 2n);
       const want = (base * BigInt(Math.round(preset.feeMul * 100))) / 100n + tip;
       if (maxFee < want) maxFee = want;
     }
   }
 
-  // maxFeePerGas must cover the tip or the node rejects the tx outright.
   if (maxFee < tip) maxFee = tip;
 
   const g = {
@@ -132,20 +104,11 @@ async function resolveGas(chainKey, cfg) {
   return g;
 }
 
-/* ---------------- FCFS hammer ----------------
- * Pulls mintSigned calldata for every wallet as fast as possible, signing each
- * tx the instant its calldata lands. Two sources:
- *   gql  — internal swap(action:MINT), alias-batched (20 wallets per request).
- *          Undocumented; any structural failure disables it for the run.
- *   v2   — public drops API, one call per wallet, chunked parallel (fallback).
- * Per-wallet errors: sold-out stops everything; wallet-specific (limit,
- * ineligible, no funds) skips that wallet; anything else retries next round. */
 async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balances, gas, urls, c, signedList }) {
   const want = walletList.filter((w) => balances[w.address] !== 0n && nonces[w.address] != null);
   const failed = new Set();
   const deadline = Date.now() + 90000;
   const GQL_CHUNK = 20, V2_CONC = 10;
-  // v2 drops API needs an API key; without one the only calldata source is gql.
   const v2Available = !!(store.readSettings().openseaKey);
 
   let contract = null, sess = null;
@@ -168,7 +131,6 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
   if (!v2Available) emit(runId, { level: 'info', msg: 'FCFS: no OpenSea API key set — calldata via gql internal only' });
 
   const signOne = async (w, call) => {
-    /* SCAM GUARD — covers the gql calldata path (buildCall guards v2 path). */
     assertValueOk(cfg, call.value);
     const signer = new ethers.Wallet(w.pk);
     const tx = {
@@ -179,7 +141,6 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
     signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call });
   };
 
-  // returns 'stop' | 'skip' | 'retry'
   const classifyWalletErr = (w, msg) => {
     if (/sold out|max supply/i.test(msg)) {
       state.stopped = true;
@@ -201,8 +162,6 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
   let lastGuardCheck = 0;
 
   while (!state.stopped && signedList.length + failed.size < want.length && Date.now() < deadline) {
-    /* SCAM GUARD: the drop can flip to another phase while the hammer runs —
-     * re-check every 10s that our stage is still the live one. */
     if (cfg.stageId && Date.now() - lastGuardCheck > 10000) {
       lastGuardCheck = Date.now();
       try { await verifyDropStage(cfg, 'live', emit, runId); }
@@ -215,7 +174,6 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
     }
     const missing = want.filter((w) => !failed.has(w.address) && !signedSet().has(w.address));
 
-    // 1) gql alias batches — one request per 20 wallets
     if (!gqlDisabled && sess && contract && missing.length) {
       for (let i = 0; i < missing.length && !state.stopped; i += GQL_CHUNK) {
         const chunk = missing.slice(i, i + GQL_CHUNK);
@@ -238,12 +196,10 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
             emit(runId, { level: 'warn', msg: `FCFS gql disabled (${m.slice(0, 100)}) — v2 fallback` });
             break;
           }
-          // GQL_RATE_LIMITED / transient → this round falls through to v2
         }
       }
     }
 
-    // 2) v2 drops API for everyone still missing (chunked parallel, proxy-aware)
     const stillMissing = v2Available ? want.filter((w) => !failed.has(w.address) && !signedSet().has(w.address)) : [];
     for (let i = 0; i < stillMissing.length && !state.stopped; i += V2_CONC) {
       await Promise.all(stillMissing.slice(i, i + V2_CONC).map(async (w) => {
@@ -262,38 +218,27 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
   if (gqlWins || v2Wins) emit(runId, { level: 'info', msg: `calldata fetched: ${gqlWins} via gql batch · ${v2Wins} via v2 API` });
 }
 
-/* ---------------- calldata builder ---------------- */
 
 async function buildCall(cfg, account, ctx) {
-  // returns { to, data, value }
   const value = ethers.parseEther(String(cfg.pricePerNft || '0')) * BigInt(cfg.amount || 1);
   if (cfg.method === 'opensea-api') {
-    /* Round-robin an exit IP per wallet when a proxy group is set. undefined =
-       direct, which is what a single-wallet run wants anyway. */
     const px = cfg.proxyGroup ? proxies.pickFromGroup(cfg.proxyGroup) : null;
     const dispatcher = px ? proxies.agentFor(px.id) : undefined;
     const d = await launchpads.openseaMintData(cfg.chain, cfg.slug, cfg.stageId, account.address, cfg.amount || 1, dispatcher);
-    /* SCAM GUARD: OpenSea serves calldata for whatever phase is active NOW —
-     * if the creator let our free stage lapse into a paid one, this is where
-     * the paid value shows up. Refuse to sign anything above the task price. */
     assertValueOk(cfg, d.value);
     return { to: d.to, data: d.data, value: d.value ?? value };
   }
   if (cfg.method === 'hex') {
     if (!cfg.hex || !/^0x[0-9a-fA-F]*$/.test(cfg.hex)) throw new Error('invalid hex');
     let data = cfg.hex;
-    // token substitution inside raw hex (padded address)
     if (cfg.hexSelfPad) data = data.replace(new RegExp(cfg.hexSelfPad.replace(/^0x/, ''), 'gi'), account.address.slice(2).toLowerCase());
     return { to: cfg.address, data, value };
   }
-  // abi function
   let abi = cfg.abi;
   if (!abi) {
     try {
       abi = (await abiMod.resolveAbi(cfg.chain, cfg.address)).abi;
     } catch (e) {
-      // Unverified contract (or ABI source down) — the human-readable signature
-      // alone is enough to encode the call, so fall back instead of dying.
       if (!cfg.function) throw e;
       const minimal = [`function ${cfg.function}`];
       try { new ethers.Interface(minimal); } catch {
@@ -306,16 +251,6 @@ async function buildCall(cfg, account, ctx) {
   return { to: cfg.address, data, value };
 }
 
-/* ---------------- scam guard: stage + value rules ----------------
- * A drop creator can rug the schedule: shorten a free WL window so the paid
- * public phase takes over, and bots that keep firing end up PAYING for what
- * was supposed to be free. Rules enforced here (all abort, never guess):
- *   1. task's stage must still exist on the drop
- *   2. stage price must still match the task's price
- *   3. at mint time the task's stage must be the live phase (not ended, not
- *      replaced by another phase)
- *   4. VALUE GUARD: never sign calldata whose value exceeds
- *      pricePerNft * amount — the last line of defense on every path. */
 const GUARD_SKEW_S = 2; // tolerate 2s API/chain clock skew
 
 function expectedValueWei(cfg) {
@@ -330,16 +265,11 @@ function assertValueOk(cfg, valueWei) {
   }
 }
 
-/* mode 'schedule': pre-gate polling — stage may still be upcoming; a moved
- *        start time is returned as { movedStart } so the caller decides.
- *      'live': calldata is about to be fetched/signed — the task's stage
- *        must be the phase that is actually running right now. */
 async function verifyDropStage(cfg, mode, emit, runId, refStartTs) {
   if (cfg.method !== 'opensea-api' || !cfg.slug || !cfg.stageId) return null;
   let snap;
   try { snap = await launchpads.openseaDropStages(cfg.slug); }
   catch (e) {
-    // API hiccup must not kill a run — the VALUE GUARD still protects signing.
     if (emit) emit(runId, { level: 'warn', msg: `stage guard: drops API unreachable (${String(e.message || '').slice(0, 80)}) — relying on value guard` });
     return null;
   }
@@ -358,21 +288,18 @@ async function verifyDropStage(cfg, mode, emit, runId, refStartTs) {
     }
     return null;
   }
-  // mode 'live'
   if (st.startTime && now < st.startTime - GUARD_SKEW_S) {
     throw new Error(`STAGE GUARD: stage "${st.label}" not open yet (opens ${new Date(st.startTime * 1000).toISOString()}). Run cancelled — start it closer to the gate.`);
   }
   if (st.endTime && now > st.endTime + GUARD_SKEW_S) {
     throw new Error(`STAGE GUARD: stage "${st.label}" ENDED ${now - st.endTime}s ago${snap.activeStageLabel ? ` — drop now on "${snap.activeStageLabel}"` : ''}. Run cancelled (would mint the wrong phase).`);
   }
-  // well into our window but OpenSea says another phase is active → rug
   if (st.startTime && now >= st.startTime + 15 && snap.activeStageId && snap.activeStageId !== st.id) {
     throw new Error(`STAGE GUARD: drop moved to another phase ("${snap.activeStageLabel || snap.activeStageId}") — task stage is "${st.label}". Run cancelled.`);
   }
   return null;
 }
 
-/* ---------------- Flashbots ---------------- */
 
 const FLASHBOTS_RELAYS = {
   1: ['https://relay.flashbots.net', 'https://rpc.beaverbuild.org', 'https://rsync-builder.xyz', 'https://api.securerpc.com/v1', 'https://builder0x69.io', 'https://rpc.titanbuilder.xyz'],
@@ -412,7 +339,6 @@ async function flashbotsSend(chainKey, signedTxs, opts = {}) {
   };
 }
 
-/* Private tx (single) — eth_sendPrivateTransaction on Flashbots Protect */
 async function flashbotsPrivate(chainKey, signedTx, opts = {}) {
   const c = chainsMod.chain(chainKey);
   if (!FLASHBOTS_RELAYS[c.id]) throw new Error(`Flashbots not on ${c.name}`);
@@ -432,7 +358,6 @@ async function flashbotsPrivate(chainKey, signedTx, opts = {}) {
   return { hash: j.result };
 }
 
-/* ---------------- simulate ---------------- */
 
 async function simulateOne(cfg, account, call, gas) {
   const c = chainsMod.chain(cfg.chain);
@@ -453,24 +378,14 @@ async function simulateOne(cfg, account, call, gas) {
   }
 }
 
-/* ---------------- FCFS timing: chain clock + onchain gate ---------------- */
 
-/* How long before the gate we do the heavy prep (balances, nonces, signing).
- * Small enough that nonces stay fresh, big enough that slow ABI lookups and
- * 100+ wallet signature batches finish comfortably. */
 const PREP_WINDOW_MS = 90000;
 
-/* Sub-ms sleep for the final approach. setTimeout drifts several ms and wakes
- * on the event loop; Atomics.wait blocks exactly and precisely. */
 function preciseSleep(ms) {
   if (ms <= 0) return;
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/* Chain clock vs machine wall clock, in ms:  chainNow = Date.now() + offset.
- * block.timestamp is set by validators and drifts from real time — on
- * Robinhood it currently runs >1s BEHIND wall clock. Median of up to 3 RPCs,
- * RTT-midpoint sampled so network latency doesn't bias the estimate. */
 async function chainClockOffset(chainKey, urls) {
   const ps = rpc.providersFor(chainKey, urls).slice(0, 3);
   const samples = [];
@@ -487,9 +402,6 @@ async function chainClockOffset(chainKey, urls) {
   return samples[Math.floor(samples.length / 2)];
 }
 
-/* Milliseconds per block, measured by block COUNT over a short wall-clock
- * window — timestamp-diff math breaks on sub-second chains (Robinhood does
- * ~10 blocks/s, so several blocks share one timestamp second). */
 async function measureBlockMs(chainKey, urls, sampleMs = 4000) {
   try {
     const p = rpc.providersFor(chainKey, urls)[0];
@@ -503,8 +415,6 @@ async function measureBlockMs(chainKey, urls, sampleMs = 4000) {
   return null;
 }
 
-/* eth_call with blockOverrides.time, sent as raw JSON-RPC because ethers v6
- * silently strips the field. Returns 'pass' | 'revert' | 'unsupported'. */
 async function rawGateCall(url, tx, ts) {
   const body = {
     jsonrpc: '2.0', id: 1, method: 'eth_call',
@@ -525,9 +435,6 @@ async function rawGateCall(url, tx, ts) {
   return 'revert';
 }
 
-/* Race up to 3 RPCs for a gate verdict at chain-time `ts` (null = latest).
- * true = call passes, false = reverts, null = undecidable (no override
- * support / all RPCs flaky). */
 async function gateCallAtTime(cfg, tx, ts, urls) {
   const list = (urls && urls.length ? urls : rpc.urlsFor(cfg.chain)).slice(0, 3);
   const results = await Promise.all(list.map((u) => rawGateCall(u, tx, ts).catch(() => 'flaky')));
@@ -537,9 +444,6 @@ async function gateCallAtTime(cfg, tx, ts, urls) {
   return false;
 }
 
-/* Ask the CHAIN for the exact second this wallet's mint call stops reverting.
- * Binary search over blockOverrides.time around the API-provided hint.
- * Returns {openNow:true} | {startTs: epochSeconds} | null (undecidable). */
 async function probeGateStart(cfg, tx, hintTs, urls) {
   const nowS = Math.floor(Date.now() / 1000);
   if (await gateCallAtTime(cfg, tx, nowS, urls)) return { openNow: true };
@@ -558,24 +462,11 @@ async function probeGateStart(cfg, tx, hintTs, urls) {
   return { startTs: hi };
 }
 
-/* ---------------- main run ---------------- */
 
-/*
-cfg = {
-  name, chain, address, method: 'abi'|'hex'|'opensea-api', function, params[], hex, abi,
-  slug, stageId, amount, pricePerNft, walletIds[], rpcs[], proxyGroup,
-  gasLimit, maxFee, priorityFee, tipMultiplier, nonceOverride,
-  mode: 'spam'|'execute', delayMs, flashbots, flashbotsBundle,
-  startTimestamp, monitor: {mode:'timestamp'|'onchain'|'off', pollMs, fn}
-  maxRetries, stopOnSoldOut
-}
-*/
 async function start(cfg) {
   const runId = nid('run');
   const walletList = (cfg.walletIds || []).map((id) => wallets.getWallet('evm', id)).filter(Boolean);
   if (!walletList.length) throw new Error('no wallets selected');
-  // J-AIO parity: mode 'simulate' = keep eth_call-ing until the call passes,
-  // then broadcast the real tx (see fire()). Re-enabled 2026-08 (removed earlier).
   const c = chainsMod.chain(cfg.chain);
   const state = {
     id: runId, cfg: { ...cfg, abi: undefined }, status: 'starting', mode: cfg.mode || 'execute',
@@ -592,7 +483,6 @@ async function start(cfg) {
       const gas = await resolveGas(cfg.chain, cfg);
       emit(runId, { level: 'info', msg: `gas maxFee=${ethers.formatUnits(gas.maxFeePerGas, 'gwei')} tip=${ethers.formatUnits(gas.maxPriorityFeePerGas, 'gwei')} gwei limit=${gas.gasLimit ?? 'auto'}` });
 
-      // resolve ABI once
       if (cfg.method === 'abi' && !cfg.abi) {
         const r = await abiMod.resolveAbi(cfg.chain, cfg.address);
         cfg.abi = r.abi;
@@ -601,21 +491,11 @@ async function start(cfg) {
 
       const urls = cfg.rpcs && cfg.rpcs.length ? cfg.rpcs : rpc.urlsFor(cfg.chain);
       const timed = !!cfg.startTimestamp;
-      /* The gate the contract enforces is block.timestamp >= startTime — CHAIN
-       * time, not wall clock, and not whatever the platform API claims. All
-       * timing below runs in chain time and is converted to local fire times
-       * with a measured clock offset. */
       let targetMs = timed ? Number(cfg.startTimestamp) * 1000 : null; // chain-time gate, ms
       let offsetMs = 0;   // chain clock − local clock, ms (positive = chain ahead)
       let blockMs = null; // ms per block on this chain
-      /* publish the current gate to the UI countdown (call after any change) */
       const syncGate = () => { state.gateMs = targetMs; state.offsetMs = offsetMs; };
 
-      /* =============== FCFS PREP — all heavy work BEFORE arming ===============
-       * Old flow armed first, then spent seconds on calldata/balances/nonces/
-       * signing AFTER the gate time, so broadcasts always landed late. Now prep
-       * finishes inside a window ending well before T-0, so at the gate the only
-       * work left is the broadcast itself. */
       if (timed) {
         state.status = 'armed';
         syncGate();
@@ -631,18 +511,10 @@ async function start(cfg) {
           await new Promise((r) => setTimeout(r, Math.min(1000, Math.max(50, prepLocal - Date.now()))));
         }
         if (state.stopped) { state.status = 'stopped'; return; }
-        // refresh the offset after a long wait — chain clocks drift
         if (cfg.chainSync !== false) { offsetMs = (await chainClockOffset(cfg.chain, urls)) ?? offsetMs; syncGate(); }
       }
 
-      // pre-flight simulate on the first wallet that can pay (unless spam-blind).
-      // A 0-balance wallet reverts for wallet-specific reasons (insufficient
-      // funds / not eligible) — aborting on that kills the whole run, and its
-      // null gasEstimate leaves gasLimit at the 300k fallback → funded wallets
-      // fail with out-of-gas too. Pick a funded wallet so the estimate is real.
       const balances = {};
-      // opensea-api calldata is stage-bound: before the stage opens the API
-      // 422s, so there is nothing sensible to preflight against — skip it.
       const osFuture = cfg.method === 'opensea-api' && timed && targetMs + offsetMs > Date.now();
       if (state.mode !== 'simulate' && cfg.preflight !== false && !osFuture) {
         await Promise.all(walletList.map(async (w, i) => {
@@ -660,7 +532,6 @@ async function start(cfg) {
         }
         if (sim.gasEstimate && !gas.gasLimit) gas.gasLimit = (BigInt(sim.gasEstimate) * 13n) / 10n;
       } else if (timed) {
-        // still need balances to skip empty wallets at sign time
         await Promise.all(walletList.map(async (w, i) => {
           try { balances[w.address] = await rpc.provider(urls[i % urls.length], c.id).getBalance(w.address); }
           catch { balances[w.address] = null; }
@@ -669,7 +540,6 @@ async function start(cfg) {
 
       if (!gas.gasLimit) gas.gasLimit = 300000n;
 
-      // pre-fetch nonces in parallel
       const nonces = {};
       const CONC = 10;
       for (let i = 0; i < walletList.length; i += CONC) {
@@ -683,7 +553,6 @@ async function start(cfg) {
       }
       emit(runId, { level: 'info', msg: `nonces fetched (${Object.values(nonces).filter((n) => n != null).length}/${walletList.length})` });
 
-      // pre-sign (abi/hex only — opensea-api calldata arrives at the gate)
       const signedList = [];
       const signWallet = async (w) => {
         if (nonces[w.address] == null) {
@@ -692,8 +561,6 @@ async function start(cfg) {
           emit(runId, { level: 'fail', wallet: w.name, msg: 'nonce fetch failed' });
           return;
         }
-        // 0-balance wallet can't pay gas or mint price — mark it and move on
-        // instead of signing + broadcasting a tx the node will reject.
         if (balances[w.address] === 0n) {
           state.counts.skipped++;
           state.results.push({ ok: false, address: w.address, error: 'no balance' });
@@ -716,9 +583,6 @@ async function start(cfg) {
           emit(runId, { level: 'fail', wallet: w.name, msg: `sign failed: ${cl.reason}` });
         }
       };
-      /* SCAM GUARD (live): anything signing right now must confirm the task's
-       * stage is the phase actually running — not one that ended or got
-       * replaced (free WL → paid public rug). */
       if (!osFuture && cfg.method === 'opensea-api' && cfg.stageId) {
         try { await verifyDropStage(cfg, 'live', emit, runId); }
         catch (e) {
@@ -732,11 +596,6 @@ async function start(cfg) {
         emit(runId, { level: 'info', msg: `pre-signed ${signedList.length} tx` });
       }
 
-      /* ============ ONCHAIN GATE VERIFICATION (block.timestamp truth) ============
-       * If the RPC honours eth_call blockOverrides, ask the chain itself for the
-       * exact second this wallet's mint call stops reverting and correct the
-       * API-provided timestamp. RPCs without override support (e.g. Robinhood)
-       * fall through to live gate-polling at fire time instead. */
       if (timed && cfg.chainSync !== false && signedList.length && cfg.method !== 'opensea-api') {
         try {
           const gateTx = { from: signedList[0].w.address, to: signedList[0].call.to, data: signedList[0].call.data, value: signedList[0].value };
@@ -761,7 +620,6 @@ async function start(cfg) {
       }
       state.status = 'running';
 
-      // Flashbots bundle path
       if (cfg.flashbotsBundle && signedList.length) {
         try {
           const fb = await flashbotsSend(cfg.chain, signedList.map((s) => s.raw), { authKey: cfg.flashbotsAuthKey });
@@ -775,12 +633,8 @@ async function start(cfg) {
         return;
       }
 
-      // broadcast
       const fire = async (s) => {
         if (state.stopped) return;
-        // J-AIO 'simulate' mode: poll eth_call until the wallet's mint call
-        // stops reverting, then land the real tx once. Stop = manual, max
-        // attempts (cfg.attemptCount), or STOP_ALL conditions below.
         if (state.mode === 'simulate' && s.call) {
           const interval = Math.max(200, Number(cfg.delayMs || 800));
           const maxTry = Number(cfg.attemptCount || 0);
@@ -826,30 +680,16 @@ async function start(cfg) {
         }
       };
 
-      /* ==================== TIMED FIRE — follow the chain ====================
-       * fireMode 'lead'      : broadcast leadMs BEFORE the gate (chain time).
-       *                        For slow-block chains whose builders simulate and
-       *                        hold not-yet-valid txs (Ethereum L1) — the tx sits
-       *                        in the mempool and lands in the FIRST eligible block.
-       * fireMode 'gate-poll' : poll the wallet's eth_call tightly and broadcast
-       *                        the instant the chain itself says open. For fast
-       *                        sequenced chains (Base, Robinhood ~99ms blocks)
-       *                        where an early tx would be included pre-gate and
-       *                        revert (burning gas + nonce).
-       * auto: lead when blocks are slow (>=5s), gate-poll otherwise. */
       if (timed && targetMs != null) {
         const mode = cfg.fireMode === 'lead' || cfg.fireMode === 'gate-poll'
           ? cfg.fireMode
           : (blockMs != null && blockMs >= 5000 ? 'lead' : 'gate-poll');
         const leadMs = cfg.leadMs != null ? Number(cfg.leadMs) : Math.round(Math.min(Math.max(blockMs || 2000, 1000), 15000));
-        /* FCFS bundle — auto-on for timed opensea-api runs (allowlist calldata
-           only exists once the stage flips live, so the gate moment is a race). */
         const fcfsOn = cfg.method === 'opensea-api' && cfg.fcfs !== false;
         const fcfsLeadMs = cfg.fcfsLeadMs != null ? Number(cfg.fcfsLeadMs) : 1500;
         let fireLocal = targetMs + offsetMs - (mode === 'lead' ? leadMs : 0);
         emit(runId, { level: 'info', msg: `fire plan: ${mode}${mode === 'lead' ? ` · lead ${(leadMs / 1000).toFixed(1)}s` : ` · poll every ${Math.max(50, Number(cfg.monitor?.pollMs || 150))}ms`} · at ${new Date(fireLocal).toISOString()} local${fcfsOn ? ' · FCFS bundle on' : ''}` });
 
-        // coarse wait until ~10s before fire time, keeping the offset fresh
         let lastSchedCheck = 0;
         while (Date.now() < fireLocal - 10000 && !state.stopped) {
           await new Promise((r) => setTimeout(r, Math.min(10000, Math.max(200, fireLocal - 10000 - Date.now()))));
@@ -861,9 +701,6 @@ async function start(cfg) {
               emit(runId, { level: 'info', msg: `chain clock re-synced: ${offsetMs >= 0 ? '+' : ''}${(offsetMs / 1000).toFixed(2)}s` });
             }
           }
-          /* SCAM GUARD (schedule): the drop creator can move or shorten the
-           * stage while we wait. Re-check every ~30s. Default = CANCEL on any
-           * change; cfg.followSchedule=true restores the old follow behavior. */
           if (cfg.method === 'opensea-api' && cfg.slug && cfg.stageId && Date.now() - lastSchedCheck > 30000) {
             lastSchedCheck = Date.now();
             try {
@@ -888,13 +725,11 @@ async function start(cfg) {
                 emit(runId, { level: 'error', msg: String(e.message) });
                 return;
               }
-              /* drops API hiccup — keep the old schedule */
             }
           }
         }
         if (state.stopped) { state.status = 'stopped'; return; }
 
-        // refresh nonces + re-sign anything that moved (cheap: local signing)
         if (signedList.length && cfg.nonceOverride == null) {
           await Promise.all(signedList.map(async (s, i) => {
             try {
@@ -914,14 +749,8 @@ async function start(cfg) {
           }));
         }
 
-        /* ---- FCFS hammer: warm connections, then pull calldata EARLY ----
-         * OpenSea starts serving mintSigned calldata the moment the stage flips
-         * live on their side. Starting fcfsLeadMs before the gate means the first
-         * successful response is already in hand when (or slightly before) the
-         * on-chain gate opens — instead of paying a full RTT after it. */
         if (fcfsOn) {
           const hammerStart = fireLocal - fcfsLeadMs;
-          // connection warming: keep TLS to OpenSea + RPCs hot until the hammer
           let lastWarm = 0;
           while (Date.now() < hammerStart - 150 && !state.stopped) {
             const sleepMs = Math.min(3000, Math.max(50, hammerStart - Date.now()));
@@ -935,7 +764,6 @@ async function start(cfg) {
           while (Date.now() < hammerStart && !state.stopped) preciseSleep(Math.min(2, Math.max(0.2, hammerStart - Date.now())));
           if (state.stopped) { state.status = 'stopped'; return; }
 
-          // fresh nonces right before the hammer — the pre-fetch can be minutes old
           if (cfg.nonceOverride == null) {
             await Promise.all(walletList.map(async (w, i) => {
               try { nonces[w.address] = await rpc.provider(urls[i % urls.length], c.id).getTransactionCount(w.address, 'pending'); }
@@ -944,8 +772,6 @@ async function start(cfg) {
           }
 
           emit(runId, { level: 'info', msg: `FCFS hammer: pulling calldata ${fcfsLeadMs}ms pre-gate (${cfg.osPath === 'v2' ? 'v2 API' : 'gql batch + v2 fallback'})…` });
-          /* SCAM GUARD: last check before pulling calldata — the gate moment is
-           * exactly when a rug (free stage → paid public) would land. */
           try { await verifyDropStage(cfg, 'live', emit, runId); }
           catch (e) {
             state.stopped = true;
@@ -964,16 +790,10 @@ async function start(cfg) {
         }
 
         if (mode === 'lead') {
-          // precise final approach — sub-ms sleeps, no RPC chatter
           while (Date.now() < fireLocal && !state.stopped) preciseSleep(Math.min(5, Math.max(0.5, fireLocal - Date.now())));
         } else {
-          // gate-poll: opensea-api calldata only exists once the stage is live
-          // on OpenSea's side, so fetch+sign it in a tight retry loop; for
-          // abi/hex the signed txs are ready — poll the gate with wallet[0].
-          // (fcfsOn runs already fetched+signed during the pre-gate hammer.)
           if (osFuture && !fcfsOn) {
             emit(runId, { level: 'info', msg: 'fetching OpenSea calldata at the gate…' });
-            /* SCAM GUARD: gate moment — verify our stage is really the live one. */
             try { await verifyDropStage(cfg, 'live', emit, runId); }
             catch (e) {
               state.status = 'aborted';
@@ -996,8 +816,6 @@ async function start(cfg) {
                   signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call });
                 } catch (e) {
                   const msg = String(e.message || '');
-                  // wallet-specific = permanent; stage-not-live style (422 before
-                  // OpenSea flips the stage) = keep retrying until timeout
                   if (/sold out|max supply/i.test(msg)) { state.stopped = true; emit(runId, { level: 'error', msg: `OpenSea says sold out: ${msg.slice(0, 120)}` }); }
                   else if (/limit|allowlist|whitelist|insufficient|ineligible/i.test(msg)) {
                     failed.add(w.address);
@@ -1028,7 +846,6 @@ async function start(cfg) {
               break;
             } catch (e) {
               if (e && e.code !== 'CALL_EXCEPTION') {
-                // transport hiccup — don't spin hot, but don't wait long either
                 await new Promise((r) => setTimeout(r, 250));
                 continue;
               }
@@ -1065,9 +882,6 @@ async function start(cfg) {
         return;
       }
 
-      // Timed runs always broadcast in parallel — FCFS means every wallet goes
-      // out at the same instant; the sequential path would stagger them by
-      // round-trip time each.
       if (timed || state.mode === 'spam' || state.mode === 'instant') {
         await Promise.all(signedList.map(fire));
       } else {
@@ -1078,7 +892,6 @@ async function start(cfg) {
         }
       }
 
-      // receipts
       state.status = 'confirming';
       await trackReceipts(runId, cfg, state, urls);
       state.status = 'done';
@@ -1140,9 +953,6 @@ async function trackReceipts(runId, cfg, state, urls) {
           const feeEth = rec.gasPrice ? ethers.formatEther(rec.gasUsed * rec.gasPrice) : null;
           r.feeEth = feeEth;
           r.tokenId = tokenIdFromReceipt(rec);
-          /* Mint price paid, so PnL can count a primary mint as spend. OpenSea
-           * events only see secondary sales — without this a minted-and-held
-           * token looks like free profit. */
           const priceEth = ethers.formatEther(
             ethers.parseEther(String(cfg.pricePerNft || '0')) * BigInt(cfg.amount || 1),
           );
@@ -1171,7 +981,6 @@ async function trackReceipts(runId, cfg, state, urls) {
   pend.filter((r) => r.pending).forEach((r) => { r.timedOut = true; emit(runId, { level: 'warn', msg: `receipt timeout ${r.hash.slice(0, 12)}…` }); });
 }
 
-/* ---------------- run control ---------------- */
 
 function stop(runId) {
   const r = runs.get(runId);
@@ -1209,7 +1018,6 @@ function clearFinished() {
   return n;
 }
 
-/* ---------------- gas calculator ---------------- */
 
 async function gasCalc(chainKey, gasLimit, gweiList, nftCount, pricePerNft) {
   const fee = await wallets.feeData(chainKey);
@@ -1229,10 +1037,6 @@ async function gasCalc(chainKey, gasLimit, gweiList, nftCount, pricePerNft) {
     baseGwei: Number(ethers.formatUnits(fee.baseFeePerGas, 'gwei')).toFixed(4),
     currentTipGwei: Number(ethers.formatUnits(fee.maxPriorityFeePerGas, 'gwei')).toFixed(4),
     ethUsd: usd, usdIdr: fx.usdIdr,
-    // What each one-click preset would actually cost right now. Same math the
-    // run uses (resolveGas), so the number on the button is the number you pay.
-    // maxGasEth/maxTotalEth = worst-case EIP-1559 ceiling; gasEth/totalEth =
-    // expected cost at the current base fee (what Etherscan shows).
     presets: await Promise.all(Object.keys(GAS_PRESETS).map(async (k) => {
       const g = await resolveGas(chainKey, { gasPreset: k });
       const gasWei = gl * g.maxFeePerGas;
@@ -1243,12 +1047,10 @@ async function gasCalc(chainKey, gasLimit, gweiList, nftCount, pricePerNft) {
         key: k,
         maxFeeGwei: Number(ethers.formatUnits(g.maxFeePerGas, 'gwei')).toFixed(3),
         tipGwei: Number(ethers.formatUnits(g.maxPriorityFeePerGas, 'gwei')).toFixed(3),
-        // worst case: only charged if base fee actually climbs to our cap
         maxGasEth: ethers.formatEther(gasWei),
         maxTotalEth: ethers.formatEther(totalWei),
         maxTotalUsd: usd ? (Number(ethers.formatEther(totalWei)) * usd).toFixed(2) : null,
         maxTotalIdr: idrOf(ethers.formatEther(totalWei)),
-        // expected: charged if base fee stays where it is
         gasEth: ethers.formatEther(expGasWei),
         totalEth: ethers.formatEther(expTotalWei),
         totalUsd: usd ? (Number(ethers.formatEther(expTotalWei)) * usd).toFixed(2) : null,
