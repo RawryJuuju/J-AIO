@@ -311,3 +311,65 @@ function hideLock() {
   $('lock').style.display = 'none';
   $('app').classList.add('on');
 }
+function initGasCalculator() {
+  const btn = $('gasCalcBtn');
+  if (!btn) return;
+
+  btn.onclick = () => {
+    modal(`
+      <h3>${icon('pnl')} Gas Profit Calculator</h3>
+      <div class="row" style="margin-top:var(--s3)">
+        <div style="flex:1"><label class="f">Mint Price ($)</label><input id="gcMint" type="number" step="any" placeholder="0" class="mono"></div>
+        <div style="flex:1"><label class="f">Sell Price ($)</label><input id="gcSell" type="number" step="any" placeholder="0" class="mono"></div>
+      </div>
+      <div class="row" style="margin-top:var(--s2)">
+        <div style="flex:1"><label class="f">OTC Price ($)</label><input id="gcOtc" type="number" step="any" placeholder="0" class="mono"></div>
+        <div style="flex:1"><label class="f">Royalty Fee (%)</label><input id="gcRoy" type="number" step="any" placeholder="0" class="mono"></div>
+      </div>
+      <div style="margin-top:var(--s3)">
+        <div class="row" style="justify-content:space-between">
+          <label class="f">Gas Aggressivity (<span id="gcAggVal">50</span>%)</label>
+        </div>
+        <input id="gcAgg" type="range" min="0" max="100" value="50" style="width:100%">
+      </div>
+      <div class="grid g2" style="margin-top:var(--s4)">
+        <div class="card" style="margin:0;padding:var(--s3)">
+          <div class="f">Gas Budget</div>
+          <div id="gcBudget" class="bignum" style="font-size:20px;color:var(--accent)">$0.00</div>
+        </div>
+        <div class="card" style="margin:0;padding:var(--s3)">
+          <div class="f">Potential Profit</div>
+          <div id="gcProfit" class="bignum" style="font-size:20px">$0.00</div>
+        </div>
+      </div>
+      <div class="acts" style="margin-top:var(--s4)">
+        <button class="btn" onclick="closeModal()">Close</button>
+      </div>
+    `);
+
+    const calc = () => {
+      const mintP = Number($('gcMint').value || 0);
+      const sellP = Number($('gcSell').value || 0);
+      const otcP = Number($('gcOtc').value || 0);
+      const royP = Number($('gcRoy').value || 0);
+      const aggP = Number($('gcAgg').value || 50);
+
+      $('gcAggVal').textContent = aggP;
+
+      const netSell = sellP * (1 - Math.min(Math.max(1 + royP, 0), 100) / 100);
+      const profitBeforeGas = netSell - mintP - Math.max(0, otcP);
+      const budget = (aggP / 100) * Math.max(0, profitBeforeGas);
+      const potentialProfit = profitBeforeGas - budget;
+
+      $('gcBudget').textContent = `$${num(budget, 2)}`;
+      const pEl = $('gcProfit');
+      pEl.textContent = `$${num(potentialProfit, 2)}`;
+      pEl.className = 'bignum ' + (potentialProfit < 0 ? 'fail' : 'ok');
+    };
+
+    ['gcMint', 'gcSell', 'gcOtc', 'gcRoy', 'gcAgg'].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('input', calc);
+    });
+  };
+}

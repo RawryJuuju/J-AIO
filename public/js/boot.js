@@ -131,6 +131,7 @@ async function afterUnlock() {
   setInterval(tickGas, 30000);
   tickClock();
   setInterval(tickClock, 1000);
+  initGasCalculator();
   const h = location.hash.replace('#', '');
   go(PAGES[h] ? h : 'home');
 }
