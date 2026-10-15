@@ -23,68 +23,66 @@
 :root,
 :root[data-theme="night"]{
   color-scheme:dark;
-  /* surfaces — luminance stacking (deeper = darker, elevated = lighter) */
-  --bg:#0a0c10; --bg2:#0e1117;
-  --panel:#12151d; --panel2:#171b25; --panel3:#1c212e;
-  /* borders — whisper-thin semi-transparent white */
-  --border:rgba(255,255,255,.07); --border2:rgba(255,255,255,.13); --line:rgba(255,255,255,.07);
+  /* surfaces — mintinginaja.app glass & deep midnight palette */
+  --bg:#0c0e1a; --bg2:#0f1223;
+  --panel:#0f122399; --panel2:#14182e; --panel3:#1a203c;
+  /* borders — subtle glass borders */
+  --border:rgba(255,255,255,.08); --border2:rgba(255,255,255,.15); --line:rgba(255,255,255,.08);
   /* translucent fills */
-  --fill-1:rgba(255,255,255,.02); --fill-2:rgba(255,255,255,.03);
-  --fill-3:rgba(255,255,255,.05); --fill-4:rgba(255,255,255,.07);
-  --row-line:rgba(255,255,255,.045); --hover:rgba(255,255,255,.05);
+  --fill-1:rgba(255,255,255,.025); --fill-2:rgba(255,255,255,.04);
+  --fill-3:rgba(255,255,255,.06); --fill-4:rgba(255,255,255,.09);
+  --row-line:rgba(255,255,255,.05); --hover:rgba(255,255,255,.06);
   /* text hierarchy */
-  --txt:#f2f5f9; --txt2:#a8b1c0; --txt3:#69738a; --mut:#69738a;
-  /* accent — J-AIO sky blue */
-  --accent:#4da3ff; --accent2:#7dbcff; --accent-soft:rgba(77,163,255,.13); --on-accent:#04121f;
-  --ok:#34d399; --ok-soft:rgba(52,211,153,.13);
-  --warn:#fbbf24; --warn-soft:rgba(251,191,36,.13);
-  --fail:#f87171; --fail-soft:rgba(248,113,113,.13);
-  --warn-txt:#ffd97a; --info-txt:#a4cdff; --fail-txt:#ffb4b4;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 4px 16px rgba(0,0,0,.22);
-  --shadow-lg:0 16px 48px rgba(0,0,0,.55);
-  /* overlays & glass */
-  --scrim:rgba(0,0,0,.55); --overlay:rgba(4,6,10,.72);
-  --glass:rgba(18,21,29,.92); --header-glass:rgba(14,17,23,.82);
-  --lock-card:rgba(18,21,29,.85); --toast-bg:rgba(23,27,37,.92);
-  --scroll:#2a3140; --scroll-hover:#3a4356;
-  /* recessed panels — the console stays terminal-dark in both themes */
-  --con-bg:#0b0e14; --inset-bg:#0d1017;
-  --disabled-bg:#161a23; --disabled-fg:#4c5568;
-  --crumb-sep:#333c4d; --on-chip:#0a0c10;
-  /* lock screen ambience */
-  --lock-g1:#0b0e14; --lock-g2:#0a0c10; --lock-g3:#0c0f16;
-  --glow:rgba(77,163,255,.10); --glow2:rgba(77,163,255,.05);
-  --pc-wash:rgba(10,12,16,.82);
+  --txt:#f8fafc; --txt2:#94a3b8; --txt3:#64748b; --mut:#64748b;
+  /* accent — modern gradient blue & glow (#3b82f6) */
+  --accent:#3b82f6; --accent2:#60a5fa; --accent-soft:rgba(59,130,246,.15); --on-accent:#ffffff;
+  --ok:#34d399; --ok-soft:rgba(52,211,153,.15);
+  --warn:#fbbf24; --warn-soft:rgba(251,191,36,.15);
+  --fail:#f87171; --fail-soft:rgba(248,113,113,.15);
+  --warn-txt:#ffd97a; --info-txt:#93c5fd; --fail-txt:#fca5a5;
+  --shadow:0 4px 20px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-lg:0 20px 50px rgba(0,0,0,.65);
+  /* overlays & glass backdrop */
+  --scrim:rgba(0,0,0,.6); --overlay:rgba(12,14,26,.8);
+  --glass:rgba(15,18,35,.85); --header-glass:rgba(12,14,26,.85);
+  --lock-card:rgba(15,18,35,.9); --toast-bg:rgba(15,18,35,.95);
+  --scroll:#1e293b; --scroll-hover:#334155;
+  --con-bg:#080911; --inset-bg:#0b0d18;
+  --disabled-bg:#161a2e; --disabled-fg:#475569;
+  --crumb-sep:#334155; --on-chip:#0c0e1a;
+  --lock-g1:#080a14; --lock-g2:#0c0e1a; --lock-g3:#0e1122;
+  --glow:rgba(59,130,246,.15); --glow2:rgba(96,165,250,.08);
+  --pc-wash:rgba(12,14,26,.85);
 }
 
 /* ================= LIGHT theme =================
    Same structure, bright surfaces, deeper accent for contrast. */
 :root[data-theme="light"]{
   color-scheme:light;
-  --bg:#f3f6fb; --bg2:#eaeff7;
-  --panel:#ffffff; --panel2:#f6f9fd; --panel3:#eef3fa;
-  --border:rgba(15,35,64,.10); --border2:rgba(15,35,64,.20); --line:rgba(15,35,64,.08);
-  --fill-1:rgba(15,35,64,.025); --fill-2:rgba(15,35,64,.04);
-  --fill-3:rgba(15,35,64,.06); --fill-4:rgba(15,35,64,.09);
-  --row-line:rgba(15,35,64,.06); --hover:rgba(15,35,64,.045);
-  --txt:#131b28; --txt2:#43536b; --txt3:#75819a; --mut:#75819a;
-  --accent:#2b7ddd; --accent2:#1a6ac4; --accent-soft:rgba(43,125,221,.11); --on-accent:#ffffff;
-  --ok:#178a5c; --ok-soft:rgba(23,138,92,.12);
-  --warn:#a87a12; --warn-soft:rgba(168,122,18,.13);
-  --fail:#cf4444; --fail-soft:rgba(207,68,68,.11);
-  --warn-txt:#7d6210; --info-txt:#25628f; --fail-txt:#993838;
-  --shadow:0 1px 2px rgba(30,60,100,.05),0 4px 14px rgba(30,60,100,.05);
-  --shadow-lg:0 8px 32px rgba(30,60,100,.14);
-  --scrim:rgba(22,39,60,.3); --overlay:rgba(22,39,60,.35);
-  --glass:rgba(255,255,255,.92); --header-glass:rgba(255,255,255,.85);
-  --lock-card:rgba(255,255,255,.9); --toast-bg:rgba(255,255,255,.94);
-  --scroll:#c3d0e0; --scroll-hover:#a9b9cd;
-  --con-bg:#0b0e14; --inset-bg:#f2f5fa;
-  --disabled-bg:#e3e8ef; --disabled-fg:#8b95a6;
-  --crumb-sep:#c3d0e0; --on-chip:#0a0c10;
-  --lock-g1:#eaf3fc; --lock-g2:#f7fbff; --lock-g3:#e4eff9;
-  --glow:rgba(43,125,221,.12); --glow2:rgba(43,125,221,.06);
-  --pc-wash:rgba(247,250,253,.85);
+  --bg:#f8fafc; --bg2:#f1f5f9;
+  --panel:#ffffffb3; --panel2:#ffffff; --panel3:#f1f5f9;
+  --border:rgba(0,0,0,.08); --border2:rgba(0,0,0,.15); --line:rgba(0,0,0,.06);
+  --fill-1:rgba(0,0,0,.02); --fill-2:rgba(0,0,0,.035);
+  --fill-3:rgba(0,0,0,.05); --fill-4:rgba(0,0,0,.07);
+  --row-line:rgba(0,0,0,.04); --hover:rgba(0,0,0,.03);
+  --txt:#1e293b; --txt2:#475569; --txt3:#94a3b8; --mut:#94a3b8;
+  --accent:#3b82f6; --accent2:#2563eb; --accent-soft:rgba(59,130,246,.1); --on-accent:#ffffff;
+  --ok:#10b981; --ok-soft:rgba(16,185,129,.1);
+  --warn:#f59e0b; --warn-soft:rgba(245,158,11,.1);
+  --fail:#ef4444; --fail-soft:rgba(239,68,68,.1);
+  --warn-txt:#b45309; --info-txt:#1d4ed8; --fail-txt:#b91c1c;
+  --shadow:0 4px 14px rgba(0,0,0,.05);
+  --shadow-lg:0 12px 36px rgba(0,0,0,.12);
+  --scrim:rgba(15,23,42,.3); --overlay:rgba(15,23,42,.35);
+  --glass:rgba(255,255,255,.9); --header-glass:rgba(255,255,255,.85);
+  --lock-card:rgba(255,255,255,.92); --toast-bg:rgba(255,255,255,.95);
+  --scroll:#cbd5e1; --scroll-hover:#94a3b8;
+  --con-bg:#0f172a; --inset-bg:#f8fafc;
+  --disabled-bg:#e2e8f0; --disabled-fg:#94a3b8;
+  --crumb-sep:#cbd5e1; --on-chip:#ffffff;
+  --lock-g1:#f1f5f9; --lock-g2:#f8fafc; --lock-g3:#e2e8f0;
+  --glow:rgba(59,130,246,.1); --glow2:rgba(59,130,246,.05);
+  --pc-wash:rgba(248,250,252,.85);
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -221,8 +219,9 @@ h2.pt{font-size:20px;font-weight:700;letter-spacing:-.5px;margin-bottom:var(--s1
 p.ps{color:var(--txt3);font-size:13px;margin-bottom:var(--s5)}
 
 .card{
-  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
-  padding:var(--s4);margin-bottom:var(--s4);box-shadow:var(--shadow);
+  background:var(--panel);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+  border:1px solid var(--border);border-radius:16px;
+  padding:var(--s5);box-shadow:var(--shadow);position:relative;
 }
 .card > h3{
   font-size:13px;font-weight:600;margin-bottom:var(--s3);color:var(--txt);
