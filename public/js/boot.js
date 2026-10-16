@@ -8,7 +8,7 @@ async function stopRun(id, isSol) {
 }
 
 const NAV_ORDER = ['Overview', 'Minting', 'NFT', 'Wallets', 'Identity', 'Infra'];
-const PAGE_ORDER = ['home', 'quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'btc', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
+const PAGE_ORDER = ['home', 'quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
 
 function renderNav() {
   const nav = $('nav');

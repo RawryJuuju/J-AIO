@@ -24,7 +24,6 @@ const eligibility = require('./eligibility');
 const activity = require('./activity');
 const fxrate = require('./fxrate');
 const keys = require('./keys');
-const btc = require('./btc');
 const pnl = require('./pnl');
 
 const PORT = Number(process.env.PORT || 8899);
@@ -218,8 +217,6 @@ const routes = {
     return wallets.consolidate(b.chain, ids(b.walletIds, 'walletIds'), addr(b.destination, 'destination'), b);
   },
   'POST /api/wallets/unwrap': async (b) => wallets.unwrapWeth(b.chain, b.walletId, b.amount),
-  'GET /api/btc/fee': async (b, q) => btc.getFeeRates(q && q.network),
-  'POST /api/btc/send': async (b) => btc.sendBtc(b),
   'GET /api/pnl/config': async () => pnl.getPnlConfig(),
   'POST /api/pnl/config': async (b) => pnl.savePnlConfig(b),
   'POST /api/pnl/card': async (b) => pnl.generatePnlCardData(b),
