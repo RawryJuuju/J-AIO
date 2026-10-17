@@ -403,20 +403,6 @@ const routes = {
     return { ok: true, ts: d.ts };
   },
 
-  'GET /api/home': async () => {
-    let cached = null;
-    try { cached = store.readSealed('pnl_cache', null); } catch { cached = null; }
-    return {
-      activity: activity.list(25),
-      counts: activity.counts(),
-      pnl: cached ? { totals: cached.totals, top: cached.top || [], at: cached.at || cached.t, chain: cached.chain } : null,
-      keys: {
-        opensea: keys.status('openseaKey'), etherscan: keys.status('etherscanKey'),
-        alchemy: keys.status('alchemyKey'), helius: keys.status('heliusKey'),
-      },
-    };
-  },
-
   'POST /api/x/start': async (b) => xmodule.start(b),
   'POST /api/x/stop': async (b) => ({ ok: xmodule.stop(b.runId) }),
   'GET /api/x/runs': async () => xmodule.list(),

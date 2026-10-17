@@ -8,7 +8,7 @@ async function stopRun(id, isSol) {
 }
 
 const NAV_ORDER = ['Overview', 'Minting', 'NFT', 'Wallets', 'Identity', 'Infra'];
-const PAGE_ORDER = ['home', 'quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
+const PAGE_ORDER = ['quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
 
 function renderNav() {
   const nav = $('nav');
@@ -133,7 +133,7 @@ async function afterUnlock() {
   setInterval(tickClock, 1000);
   initGasCalculator();
   const h = location.hash.replace('#', '');
-  go(PAGES[h] ? h : 'home');
+  go(PAGES[h] ? h : 'quick');
 }
 
 $('unlockBtn').onclick = async () => {

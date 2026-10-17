@@ -364,17 +364,34 @@ page('mint', {
       ok('Prefilled', `${p.label || 'project'} · ${MSEL.size} wallet(s)`);
     }
 
-    $('mResolve').onclick = async () => {
+    function looksMintable(v) {
+      const s = String(v || '').trim();
+      return /^0x[a-fA-F0-9]{40}$/.test(s) || /^https?:\/\/\S+\.\S+/.test(s);
+    }
+
+    let mDtv = null;
+    async function doResolve(silent) {
+      const raw = $('mUrl').value.trim();
+      if (!looksMintable(raw)) {
+        if (!silent) warn('Paste a link or a 0x contract address');
+        return;
+      }
       const b = $('mResolve'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
       try {
-        RES = await api('/resolve', { input: $('mUrl').value.trim(), chain: $('mChain').value });
+        RES = await api('/resolve', { input: raw, chain: $('mChain').value });
         applyResolve(RES);
-        ok('Resolved', `${RES.platform} · ${RES.name || RES.address || ''}`);
+        $('mInfo').style.display = '';
+        if (!silent) ok('Resolved', `${RES.platform} · ${RES.name || RES.address || ''}`);
         refreshGas();
-      } catch (e) { err('Resolve failed', e.message); $('mInfo').innerHTML = `<div class="failbox">${esc(e.message)}</div>`; }
-      finally { b.disabled = false; b.textContent = 'Resolve'; }
-    };
-    $('mUrl').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('mResolve').click(); });
+      } catch (e) {
+        $('mInfo').innerHTML = `<div class="failbox">${esc(e.message)}</div>`;
+        if (!silent) err('Resolve failed', e.message);
+      } finally { b.disabled = false; b.textContent = 'Resolve'; }
+    }
+    $('mResolve').onclick = () => doResolve(false);
+    $('mUrl').addEventListener('input', () => { clearTimeout(mDtv); if (looksMintable($('mUrl').value)) mDtv = setTimeout(() => doResolve(true), 700); });
+    $('mUrl').addEventListener('paste', () => setTimeout(() => { clearTimeout(mDtv); if (looksMintable($('mUrl').value)) doResolve(true); }, 30));
+    $('mUrl').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { clearTimeout(mDtv); doResolve(false); } });
 
     function applyResolve(r) {
       if (r.chain && S.chains.some((c) => c.key === r.chain)) { $('mChain').value = r.chain; syncChain(); }
@@ -407,7 +424,9 @@ page('mint', {
         $('mParams').value = (r.suggested.params || []).join('\n');
         if (r.suggested.gasLimit) $('mGasLimit').value = r.suggested.gasLimit;
       }
-      applyStage(st[0], r.probe);
+      const openIdx = st.findIndex((s) => !s.startTime || s.startTime * 1000 <= Date.now());
+      $('mStage').value = String(st[openIdx >= 0 ? openIdx : 0].id);
+      applyStage(st[openIdx >= 0 ? openIdx : 0], r.probe);
       $('mStage').onchange = () => applyStage(st.find((x) => String(x.id) === $('mStage').value), r.probe);
     }
 
@@ -417,6 +436,7 @@ page('mint', {
       if (cap != null) {
         $('mAmt').max = cap;
         if (Number($('mAmt').value || 1) > Number(cap)) $('mAmt').value = cap;
+        if (Number($('mAmt').value) < 1) $('mAmt').value = 1;
       } else $('mAmt').removeAttribute('max');
       if (!s) { refreshGas(); return; }
       if (s.price != null) $('mPrice').value = s.price;

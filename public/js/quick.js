@@ -43,12 +43,10 @@ page('quick', {
 
       <div class="card" id="qActCard" style="display:none">
         <div class="row">
-          <button class="btn" id="qCheck">Check eligible</button>
           <div style="flex:1"></div>
           <button class="btn pri lg" id="qGo">Mint now</button>
         </div>
         <div class="sm mut" id="qGasEst" style="margin-top:var(--s2)">—</div>
-        <div id="qCheckOut"></div>
       </div>
 
       <div class="card" id="qLive" style="display:none"><h3>Live <span class="sub" id="qRunTag"></span>
@@ -130,6 +128,9 @@ page('quick', {
         return `<option value="${esc(String(s.id))}">${esc(s.name)} · ${price}</option>`;
       }).join('');
 
+      const openIdx = st.findIndex((s) => !s.startTime || s.startTime * 1000 <= Date.now());
+      $('qStage').value = String(st[openIdx >= 0 ? openIdx : 0].id);
+
       $('qCard').style.display = '';
       $('qWCard').style.display = '';
       $('qActCard').style.display = '';
@@ -145,7 +146,8 @@ page('quick', {
       const cap = Number(s.maxPerWallet || RES?.probe?.maxPerWallet || 0);
       $('qMaxHint').textContent = cap > 0 ? `— max ${cap} per wallet` : '';
       $('qAmt').max = cap > 0 ? cap : '';
-      if (cap > 0 && Number($('qAmt').value) > cap) $('qAmt').value = cap;
+      if (cap > 0) $('qAmt').value = cap;
+      else if (Number($('qAmt').value) < 1) $('qAmt').value = 1;
 
       if (s.startTime) {
         const when = new Date(s.startTime * 1000).toLocaleString('en-GB');
@@ -231,55 +233,12 @@ page('quick', {
     function syncBtns() {
       const n = QSEL.size;
       $('qWCount').textContent = `${n} selected`;
-      ['qCheck', 'qGo'].forEach((id) => gate(id, n > 0, 'Select at least one wallet'));
+      gate('qGo', n > 0, 'Select at least one wallet');
       qGas();
     }
     $('qWGroup').onchange = renderPills;
     $('qWAll').onclick = () => { const g = $('qWGroup').value; S.wallets.evm.filter((w) => !g || w.groupId === g).forEach((w) => QSEL.add(w.id)); renderPills(); };
     $('qWNone').onclick = () => { QSEL.clear(); renderPills(); };
-
-    const VERDICT = {
-      eligible: ['ok', 'Eligible'],
-      not_eligible: ['fail', 'Not eligible'],
-      underfunded: ['warn', 'Underfunded'],
-      limit_reached: ['warn', 'Limit reached'],
-      closed: ['mut', 'Closed'],
-      unknown: ['mut', 'Unknown'],
-    };
-
-    $('qCheck').onclick = async () => {
-      if (!RES) return warn('Detect a collection first');
-      const b = $('qCheck'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Checking';
-      try {
-        const r = await api('/eligibility', {
-          input: $('qUrl').value.trim(), chain: RES.chain,
-          stageId: currentStage().id, quantity: Number($('qAmt').value || 1),
-          price: $('qPrice').value || '0', walletIds: [...QSEL],
-        });
-        const c = r.counts || {};
-        $('qCheckOut').innerHTML = `<div class="tiles sm" style="margin-top:var(--s3)">
-            ${Object.entries(VERDICT).filter(([k]) => c[k]).map(([k, v]) => `<div class="tile"><div class="k">${esc(v[1])}</div><div class="v ${v[0]}">${c[k]}</div></div>`).join('')}
-          </div>
-          <div class="tw" style="margin-top:var(--s3)"><table><thead><tr>
-            <th>Wallet</th><th>Address</th><th>Status</th><th>Reason</th><th class="rt">Balance</th></tr></thead><tbody>
-            ${r.rows.map((x) => {
-    const v = VERDICT[x.verdict] || VERDICT.unknown;
-    return `<tr><td>${esc(x.name || '—')}</td><td class="m sm">${esc(short(x.address, 6))}</td>
-                <td><span class="tag ${v[0]}">${esc(v[1])}</span></td>
-                <td class="sm mut">${esc(x.reason || '')}</td>
-                <td class="num">${x.balance != null ? fx(x.balance, 4) : '—'}</td></tr>`;
-  }).join('')}
-          </tbody></table></div>
-          ${r.eligible.length ? `<div class="row" style="margin-top:var(--s3)"><button class="btn sm" id="qKeepElig">Keep only the ${r.eligible.length} eligible</button></div>` : ''}`;
-        if (r.eligible.length) {
-          $('qKeepElig').onclick = () => {
-            QSEL.clear(); r.eligible.forEach((id) => QSEL.add(id));
-            renderPills(); ok('Selection trimmed', `${r.eligible.length} wallet(s)`);
-          };
-        }
-      } catch (e) { err('Check failed', e.message); }
-      finally { b.disabled = false; b.textContent = 'Check eligible'; }
-    };
 
     function cfgFor(mode) {
       if (!RES) throw new Error('detect a collection first');
