@@ -43,8 +43,10 @@ page('mint', {
         <!-- calldata: only renders for abi/hex methods. OpenSea (the common path)
              keeps these display:none, so the grid stays six rows tall. -->
         <div class="mfg" id="mFnWrap" style="display:none">
-          <div class="mfc12"><label class="f">Function signature</label>
+          <div class="mfc7"><label class="f">Function signature</label>
             <input id="mFn" class="mono" placeholder="mint(uint256)"></div>
+          <div class="mfc5"><label class="f">Method <span class="mfh">detected</span></label>
+            <select id="mFnSel" style="display:none"></select></div>
         </div>
         <div id="mParamsWrap" style="display:none"><label class="f">Params <span class="mfh">{wallet} {amount} {proof}, [] = empty</span></label>
           <textarea id="mParams" rows="2" class="mono" placeholder="{amount}"></textarea></div>
@@ -65,7 +67,7 @@ page('mint', {
         <div class="mfg">
           <div class="mfc6"><label class="f">Wallets <span class="mfh" id="mWCount">0</span>
             <span class="mf-btns"><label class="chk sm"><input type="checkbox" id="mWFunded"> Funded Only</label></span></label>
-            <select id="mWGroup"></select></div>
+            <div id="mWGroup"></div></div>
           <div class="mfc6"><label class="f">RPC Endpoints
             <span class="mf-btns"><label class="chk sm"><input type="checkbox" id="mFlash"> Flashbots</label></span></label>
             <select id="mRpc"><option value="">Auto (all healthy)</option></select></div>
@@ -305,18 +307,11 @@ page('mint', {
     });
 
     let BALCACHE = null; // { chain, balances: {addrLower: eth} }
-    function renderWG() {
-      $('mWGroup').innerHTML = '<option value="">All groups</option>'
-        + S.wgroups.evm.map((g) => `<option value="${g.id}">${esc(g.name)} (${g.count})</option>`).join('');
-    }
-    function candidateWallets() {
-      const g = $('mWGroup').value;
-      return S.wallets.evm.filter((w) => !g || w.groupId === g);
-    }
+    function candidateWallets() { return S.wallets.evm; }
     async function applyWallets() {
       let rows = candidateWallets();
       if (!rows.length) { MSEL.clear(); syncMintBtns(); return; }
-      if ($('mWFunded').checked) {
+      const fundedFilter = async (sel) => {
         const chain = $('mChain').value;
         if (!BALCACHE || BALCACHE.chain !== chain) {
           try {
@@ -330,11 +325,16 @@ page('mint', {
           if (!GAS) await refreshGas();
           const p = presetRow();
           const need = p ? Number(p.maxTotalEth) : Number((GAS && GAS.rows && GAS.rows[0] || {}).totalEth || 0);
-          rows = rows.filter((w) => (BALCACHE.map[w.address.toLowerCase()] ?? 0) >= need);
+          [...sel].forEach((id) => {
+            const w = S.wallets.evm.find((x) => x.id === id);
+            if (w && (BALCACHE.map[w.address.toLowerCase()] ?? 0) < need) sel.delete(id);
+          });
         }
-      }
-      MSEL.clear();
-      rows.forEach((w) => MSEL.add(w.id));
+      };
+      const box = $('mWGroup');
+      box.innerHTML = '';
+      box.appendChild(walletTree(MSEL, { wallets: rows, groups: S.wgroups.evm, onChange: async (sel) => { await fundedFilter(sel); syncMintBtns(); } }));
+      if ($('mWFunded').checked) await fundedFilter(MSEL);
       syncMintBtns();
     }
     function syncMintBtns() {
@@ -344,9 +344,13 @@ page('mint', {
       gate('mFire', n > 0, 'Select at least one wallet');
       syncEst();
     }
-    $('mWGroup').onchange = applyWallets;
-    $('mWFunded').onchange = applyWallets;
-    renderWG(); applyWallets();
+    $('mWFunded').onchange = async () => {
+      const box = $('mWGroup');
+      box.innerHTML = '';
+      box.appendChild(walletTree(MSEL, { wallets: candidateWallets(), groups: S.wgroups.evm, onChange: async (sel) => { if ($('mWFunded').checked) { const chain = $('mChain').value; if (!BALCACHE || BALCACHE.chain !== chain) { try { const r = await api('/wallets/balances', { kind: 'evm', chain, addresses: candidateWallets().map((w) => w.address) }); const map = {}; (r.balances || r).forEach((b) => { map[b.address.toLowerCase()] = Number(b.balance); }); BALCACHE = { chain, map }; } catch { BALCACHE = null; } } if (BALCACHE) { if (!GAS) await refreshGas(); const p = presetRow(); const need = p ? Number(p.maxTotalEth) : Number((GAS && GAS.rows && GAS.rows[0] || {}).totalEth || 0); [...sel].forEach((id) => { const w = S.wallets.evm.find((x) => x.id === id); if (w && (BALCACHE.map[w.address.toLowerCase()] ?? 0) < need) sel.delete(id); }); } } syncMintBtns(); } }));
+      syncMintBtns();
+    };
+    applyWallets();
     renderProxies(); renderRpcs(); syncMethod(); syncChain();
 
     if (S.prefillMint) {
@@ -423,6 +427,18 @@ page('mint', {
         $('mFn').value = r.suggested.function || '';
         $('mParams').value = (r.suggested.params || []).join('\n');
         if (r.suggested.gasLimit) $('mGasLimit').value = r.suggested.gasLimit;
+        const cands = r.mintCandidates || [];
+        const sel = $('mFnSel');
+        if (cands.length > 1) {
+          sel.innerHTML = cands.map((c) => `<option value="${esc(c.signature)}"${c.signature === r.suggested.function ? ' selected' : ''}>${esc(c.name)}(${esc(c.inputs.map((i) => i.type).join(','))})${c.payable ? ' · payable' : ''}</option>`).join('');
+          sel.style.display = '';
+          sel.onchange = () => {
+            const c = cands.find((x) => x.signature === sel.value);
+            if (!c) return;
+            $('mFn').value = c.signature;
+            $('mParams').value = c.inputs.map((i) => i.type === 'address' ? '{wallet}' : (i.type === 'uint256' ? '{amount}' : '')).join('\n');
+          };
+        } else { sel.style.display = 'none'; sel.innerHTML = ''; }
       }
       const openIdx = st.findIndex((s) => !s.startTime || s.startTime * 1000 <= Date.now());
       $('mStage').value = String(st[openIdx >= 0 ? openIdx : 0].id);

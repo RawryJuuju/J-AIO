@@ -408,16 +408,23 @@ async function scatter(url) {
 
 async function contractOnly(address, chainKey) {
   const probe = await abiMod.probeContract(chainKey || 'ethereum', address);
-  let abi = null, funcs = [];
+  let abi = null, funcs = [], mintCandidates = [];
   try {
     const r = await abiMod.resolveAbi(chainKey || 'ethereum', address);
     abi = r.abi; funcs = abiMod.writeFunctions(r.abi);
+    mintCandidates = abiMod.probeMintCandidates(r.abi);
     probe.abiSource = r.source; probe.proxyImpl = r.proxy || null; probe.contractName = r.name;
   } catch (e) { probe.abiError = String(e.message).slice(0, 120); }
+  const suggested = abiMod.suggestMintMethod(funcs, probe);
   return {
     platform: 'contract', chain: chainKey || 'ethereum', address, name: probe.contractName || probe.name,
     stages: probe.phases.map((ph, i) => ({ id: String(i), name: ph.name, price: ph.price, maxPerWallet: ph.maxPerWallet, isPublic: true })),
-    probe, abi, functions: funcs, mintMethod: 'contract',
+    probe, abi, functions: funcs, mintCandidates, mintMethod: 'contract',
+    suggested: suggested ? {
+      function: suggested.signature,
+      params: suggested.inputs.map((i) => i.type === 'address' ? '{wallet}' : (i.type === 'uint256' ? '{amount}' : '')),
+      gasLimit: probe.price === '0' ? 300000 : 400000,
+    } : null,
   };
 }
 

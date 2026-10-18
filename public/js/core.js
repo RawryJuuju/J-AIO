@@ -260,6 +260,94 @@ function pillList(items, selectedSet, onChange) {
   return wrap;
 }
 
+// Checkbox tree wallet picker: ALL → groups → wallets (Disperse-style)
+// opts: { wallets:[{id,name,address,groupId}], groups:[{id,name,count}], onChange(sel) }
+function walletTree(sel, opts) {
+  const wrap = document.createElement('div');
+  wrap.className = 'wtree';
+  const wallets = opts.wallets || [];
+  const groups = opts.groups || [];
+  const groupOf = (gid) => wallets.filter((w) => w.groupId === gid);
+  const allIds = () => new Set(wallets.map((w) => w.id));
+  const grpIds = (gid) => new Set(groupOf(gid).map((w) => w.id));
+  const any = (ids) => [...ids].some((id) => sel.has(id));
+  const all = (ids) => ids.size > 0 && [...ids].every((id) => sel.has(id));
+
+  function refresh(ids) {
+    return { checked: all(ids), indeterminate: !all(ids) && any(ids) };
+  }
+  function setInput(inp, ids) {
+    const r = refresh(ids);
+    inp.checked = r.checked;
+    inp.indeterminate = r.indeterminate;
+  }
+
+  const allRow = document.createElement('label');
+  allRow.className = 'wt-row wt-all';
+  const allC = document.createElement('input');
+  allC.type = 'checkbox';
+  allRow.appendChild(allC);
+  const allLbl = document.createElement('span');
+  allLbl.className = 'wt-lbl'; allLbl.textContent = 'ALL';
+  const allCnt = document.createElement('span');
+  allCnt.className = 'wt-cnt'; allCnt.textContent = `${wallets.length}`;
+  allRow.append(allLbl, allCnt);
+  allC.onchange = () => { allIds().forEach((id) => { if (allC.checked) sel.add(id); else sel.delete(id); }); rerender(); };
+  wrap.appendChild(allRow);
+
+  const grpBox = document.createElement('div');
+  grpBox.className = 'wt-groups';
+  for (const g of groups) {
+    const gRows = groupOf(g.id);
+    if (!gRows.length) continue;
+    const gRow = document.createElement('label');
+    gRow.className = 'wt-row wt-grp';
+    const gC = document.createElement('input');
+    gC.type = 'checkbox'; gC.dataset.g = g.id;
+    gRow.appendChild(gC);
+    const exp = document.createElement('span');
+    exp.className = 'wt-exp';
+    const gLbl = document.createElement('span');
+    gLbl.className = 'wt-lbl'; gLbl.textContent = g.name;
+    const gCnt = document.createElement('span');
+    gCnt.className = 'wt-cnt'; gCnt.textContent = `${gRows.length}`;
+    gRow.append(exp, gLbl, gCnt);
+    gC.onchange = () => { grpIds(g.id).forEach((id) => { if (gC.checked) sel.add(id); else sel.delete(id); }); rerender(); };
+    exp.onclick = (e) => { e.preventDefault(); e.stopPropagation(); wBox.classList.toggle('open'); exp.classList.toggle('on'); };
+
+    const wBox = document.createElement('div');
+    wBox.className = 'wt-wallets';
+    for (const w of gRows) {
+      const wRow = document.createElement('label');
+      wRow.className = 'wt-row wt-wal';
+      const wC = document.createElement('input');
+      wC.type = 'checkbox'; wC.checked = sel.has(w.id); wC.dataset.w = w.id; wC.dataset.gp = g.id;
+      wC.onchange = () => { if (wC.checked) sel.add(w.id); else sel.delete(w.id); rerender(); };
+      const wLbl = document.createElement('span');
+      wLbl.className = 'wt-lbl'; wLbl.textContent = w.name || short(w.address, 6);
+      const wAddr = document.createElement('span');
+      wAddr.className = 'wt-addr'; wAddr.textContent = short(w.address, 4);
+      wRow.append(wC, wLbl, wAddr);
+      wBox.appendChild(wRow);
+    }
+    grpBox.appendChild(gRow);
+    grpBox.appendChild(wBox);
+  }
+  wrap.appendChild(grpBox);
+
+  function rerender() {
+    setInput(allC, allIds());
+    for (const g of groups) {
+      const gC = grpBox.querySelector(`input[data-g="${g.id}"]`);
+      if (gC) setInput(gC, grpIds(g.id));
+      grpBox.querySelectorAll(`input[data-w][data-gp="${g.id}"]`).forEach((inp) => { inp.checked = sel.has(inp.dataset.w); });
+    }
+    if (opts.onChange) opts.onChange(sel);
+  }
+  rerender();
+  return wrap;
+}
+
 function conLine(el, e) {
   const d = document.createElement('div');
   d.className = 'l ' + (e.level || 'info');

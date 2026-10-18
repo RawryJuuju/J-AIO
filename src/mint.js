@@ -108,7 +108,7 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
   const want = walletList.filter((w) => balances[w.address] !== 0n && nonces[w.address] != null);
   const failed = new Set();
   const deadline = Date.now() + 90000;
-  const GQL_CHUNK = 20, V2_CONC = 10;
+  const GQL_CHUNK = 250, V2_CONC = 10;
   const v2Available = !!(store.readSettings().openseaKey);
 
   let contract = null, sess = null;
@@ -138,7 +138,7 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
       nonce: nonces[w.address], gasLimit: gas.gasLimit,
       maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas, type: 2,
     };
-    signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call });
+    signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call, nonce: tx.nonce, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas });
   };
 
   const classifyWalletErr = (w, msg) => {
@@ -575,7 +575,7 @@ async function start(cfg) {
             nonce: nonces[w.address], gasLimit: gas.gasLimit,
             maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas, type: 2,
           };
-          signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call });
+          signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call, nonce: tx.nonce, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas });
         } catch (e) {
           state.counts.failed++;
           const cl = classify(e);
@@ -666,7 +666,7 @@ async function start(cfg) {
           if (cfg.flashbots) res = await flashbotsPrivate(cfg.chain, s.raw, { authKey: cfg.flashbotsAuthKey });
           else res = await rpc.broadcast(cfg.chain, s.raw, urls);
           state.counts.sent++;
-          state.results.push({ ok: true, address: s.w.address, hash: res.hash, pending: true });
+          state.results.push({ ok: true, address: s.w.address, hash: res.hash, pending: true, ts: Date.now(), nonce: s.nonce, pk: s.w.pk, call: s.call, value: s.value, maxFeePerGas: s.maxFeePerGas, maxPriorityFeePerGas: s.maxPriorityFeePerGas });
           emit(runId, { level: 'ok', wallet: s.w.name, msg: `sent ${res.hash}`, hash: res.hash });
         } catch (e) {
           const cl = classify(e);
@@ -813,7 +813,7 @@ async function start(cfg) {
                     nonce: nonces[w.address], gasLimit: gas.gasLimit,
                     maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas, type: 2,
                   };
-                  signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call });
+                  signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call, nonce: tx.nonce, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas });
                 } catch (e) {
                   const msg = String(e.message || '');
                   if (/sold out|max supply/i.test(msg)) { state.stopped = true; emit(runId, { level: 'error', msg: `OpenSea says sold out: ${msg.slice(0, 120)}` }); }
@@ -936,6 +936,9 @@ async function trackReceipts(runId, cfg, state, urls) {
   const pend = state.results.filter((r) => r.ok && r.hash && r.pending);
   if (!pend.length) return;
   const deadline = Date.now() + Number(cfg.receiptTimeoutMs || 90000);
+  const pendingTimeoutMs = Number(cfg.pendingTimeoutMs || 20000);
+  const maxAttempts = Math.max(1, Number(cfg.maxRetries || 1));
+  const bumpBps = 11250n; // 112.5% same-nonce fee bump (osnm-z default)
   while (Date.now() < deadline) {
     const left = pend.filter((r) => r.pending);
     if (!left.length) break;
@@ -943,7 +946,25 @@ async function trackReceipts(runId, cfg, state, urls) {
       try {
         const p = rpc.provider(urls[i % urls.length], c.id);
         const rec = await p.getTransactionReceipt(r.hash);
-        if (!rec) return;
+        if (!rec) {
+          // same-nonce replacement: still pending past timeout → resubmit with bumped fees
+          if (r.pk && r.nonce != null && r.maxFeePerGas && !r.stoppedReplacing
+              && Date.now() - r.ts > pendingTimeoutMs && (r.replaces || 0) < maxAttempts) {
+            r.replaces = (r.replaces || 0) + 1;
+            const maxFee = (BigInt(r.maxFeePerGas) * bumpBps) / 10000n;
+            const tip = (BigInt(r.maxPriorityFeePerGas) * bumpBps) / 10000n;
+            const signer = new ethers.Wallet(r.pk);
+            const raw = await signer.signTransaction({
+              chainId: c.id, to: r.call.to, data: r.call.data, value: r.value,
+              nonce: r.nonce, gasLimit: r.gasLimit || 300000n,
+              maxFeePerGas: maxFee, maxPriorityFeePerGas: tip, type: 2,
+            });
+            const res = await rpc.broadcast(cfg.chain, raw, urls);
+            r.hash = res.hash; r.ts = Date.now(); r.replacedHash = res.hash;
+            emit(runId, { level: 'warn', wallet: walletNameFor(state, r.address), msg: `pending → fee-bump resubmit (${r.replaces}/${maxAttempts}) ${res.hash}`, hash: res.hash });
+          }
+          return;
+        }
         r.pending = false;
         r.block = rec.blockNumber;
         r.gasUsed = rec.gasUsed.toString();
@@ -999,7 +1020,13 @@ function stopAll() {
 function status(runId) {
   const r = runs.get(runId);
   if (!r) return null;
-  return { id: r.id, status: r.status, mode: r.mode, counts: r.counts, started: r.started, name: r.cfg.name, chain: r.cfg.chain, address: r.cfg.address, gateMs: r.gateMs, offsetMs: r.offsetMs || 0, results: r.results.slice(-400) };
+  return { id: r.id, status: r.status, mode: r.mode, counts: r.counts, started: r.started, name: r.cfg.name, chain: r.cfg.chain, address: r.cfg.address, gateMs: r.gateMs, offsetMs: r.offsetMs || 0, results: r.results.slice(-400).map(stripSensitive) };
+}
+
+function stripSensitive(x) {
+  if (!x) return x;
+  const { pk, call, value, maxFeePerGas, maxPriorityFeePerGas, ...safe } = x;
+  return safe;
 }
 
 function list() {

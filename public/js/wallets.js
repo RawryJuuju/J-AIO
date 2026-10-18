@@ -550,6 +550,8 @@ function disperseModal() {
       <div><label class="f">Target group</label><select id="dsG"><option value="">— use list below —</option>${gs.map((g) => `<option value="${g.id}">${esc(g.name)} (${g.count})</option>`).join('')}</select></div>
       <div><label class="f">Amount each</label><input id="dsAmt" placeholder="0.005"></div>
     </div>
+    <label class="f" style="margin-top:var(--s3)">Or pick wallets <span class="opt">— checkbox tree</span></label>
+    <div id="dsTree"></div>
     <div id="dsRngWrap" style="display:none;margin-top:var(--s3)"><label class="f">Random range <span class="opt">— min max</span></label><input id="dsRng" class="mono" placeholder="0.02 - 0.03"></div>
     <label class="f" style="margin-top:var(--s3)">Or explicit targets <span class="opt">— address,amount per line</span></label>
     <textarea id="dsT" rows="6" placeholder="0xabc…,0.01"></textarea>
@@ -559,6 +561,9 @@ function disperseModal() {
   const amtSel = $('dsAmtMode');
   const syncAmt = () => { $('dsRngWrap').style.display = amtSel.value === 'random' ? '' : 'none'; if (amtSel.value !== 'fixed') $('dsAmt').value = ''; };
   amtSel.onchange = syncAmt;
+  const DSTSEL = new Set();
+  const dt = $('dsTree');
+  if (dt) dt.appendChild(walletTree(DSTSEL, { wallets: (S.wallets[WK] || []).filter((w) => w.id !== $('dsFrom').value), groups: gs }));
   document.querySelectorAll('.chiprow .chip').forEach((b) => b.onclick = () => { $('dsTok').value = b.dataset.t; });
   $('dsGo').onclick = async () => {
     const b = $('dsGo'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
@@ -569,6 +574,9 @@ function disperseModal() {
         targets = txt.split('\n').map((l) => { const [a, m] = l.split(/[,\s]+/); return { address: a, amount: m || $('dsAmt').value }; }).filter((x) => x.address);
       } else if ($('dsG').value) {
         targets = (S.wallets[WK] || []).filter((w) => w.groupId === $('dsG').value && w.id !== $('dsFrom').value)
+          .map((w) => ({ address: w.address, amount: $('dsAmt').value }));
+      } else if (DSTSEL.size) {
+        targets = (S.wallets[WK] || []).filter((w) => DSTSEL.has(w.id) && w.id !== $('dsFrom').value)
           .map((w) => ({ address: w.address, amount: $('dsAmt').value }));
       }
       if (!targets.length) throw new Error('no targets');

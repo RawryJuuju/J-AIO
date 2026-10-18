@@ -252,6 +252,43 @@ function resolveParam(raw, type, ctx) {
   return v;
 }
 
+function probeMintCandidates(abi) {
+  const seen = new Map();
+  for (const f of abi.filter((f) => f.type === 'function' && !['view', 'pure'].includes(f.stateMutability))) {
+    const sig = `${f.name}(${(f.inputs || []).map((i) => i.type).join(',')})`;
+    const name = f.name;
+    const inputs = f.inputs || [];
+    const base = name.toLowerCase();
+    let score = 0;
+    if (/^(mint|drop)$/.test(base)) score = 100;
+    else if (/^(publicmint|publicmint|freemint)$/.test(base)) score = 95;
+    else if (/^mint/.test(base)) score = 80;
+    else if (/^(claim|drop)$/.test(base)) score = 70;
+    else if (/^free/.test(base)) score = 65;
+    else if (/^(buy|purchase)/.test(base)) score = 50;
+    else if (/mint/.test(base)) score = 40;
+    else if (/claim/.test(base)) score = 30;
+    else continue;
+    if (inputs.length > 2) score -= 10 * (inputs.length - 2);
+    if (!f.payable) score -= 5;
+    const key = name;
+    if (!seen.has(key) || score > seen.get(key).score) seen.set(key, { signature: sig, name, inputs: inputs.map((i) => ({ name: i.name, type: i.type })), payable: f.payable, score });
+  }
+  return [...seen.values()].sort((a, b) => b.score - a.score);
+}
+
+function suggestMintMethod(funcs, probe) {
+  const prefersFirstArgWallet = (f) => f.inputs[0] && (f.inputs[0].type === 'address' || /address\[\]/.test(f.inputs[0].type));
+  // best: a mint function whose first arg is a wallet (recipient-style mint)
+  const recipient = funcs.find((f) => prefersFirstArgWallet(f) && /^(mint|drop)/.test(f.name));
+  if (recipient) return recipient;
+  const single = funcs.find((f) => f.inputs.length === 1 && /^(mint|claim|drop)/.test(f.name));
+  if (single) return single;
+  const noArg = funcs.find((f) => f.inputs.length === 0 && /^(mint|claim|drop)/.test(f.name));
+  if (noArg) return noArg;
+  return funcs[0] || null;
+}
+
 function encodeCall(abi, funcSig, params, ctx) {
   const iface = new ethers.Interface(abi);
   let frag = iface.fragments.find((f) => f.type === 'function' && (
@@ -267,4 +304,4 @@ function encodeCall(abi, funcSig, params, ctx) {
   return iface.encodeFunctionData(frag, args);
 }
 
-module.exports = { fetchAbi, resolveAbi, detectProxy, writeFunctions, probeContract, encodeCall, resolveParam, cacheGet, cacheSet, dedupeAbi };
+module.exports = { fetchAbi, resolveAbi, detectProxy, writeFunctions, probeContract, encodeCall, resolveParam, cacheGet, cacheSet, dedupeAbi, probeMintCandidates, suggestMintMethod };

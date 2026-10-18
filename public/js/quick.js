@@ -33,11 +33,6 @@ page('quick', {
 
       <div class="card" id="qWCard" style="display:none">
         <h3>Wallets <span class="sub" id="qWCount">0 selected</span></h3>
-        <div class="row">
-          <div style="flex:1;min-width:170px"><label class="f">Group</label><select id="qWGroup"></select></div>
-          <button class="btn sm" id="qWAll">Select all</button>
-          <button class="btn sm" id="qWNone">Clear</button>
-        </div>
         <div id="qWPills"></div>
       </div>
 
@@ -135,7 +130,7 @@ page('quick', {
       $('qWCard').style.display = '';
       $('qActCard').style.display = '';
       syncStage();
-      renderWG(); renderPills();
+      renderPills();
     }
 
     let stageGateMs = null, qGateInfo = null;
@@ -210,24 +205,17 @@ page('quick', {
     $('qUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(dtv); detect(false); } });
     $('qDetect').onclick = () => { clearTimeout(dtv); detect(false); };
 
-    function renderWG() {
-      const cur = $('qWGroup').value;
-      $('qWGroup').innerHTML = '<option value="">All groups</option>'
-        + S.wgroups.evm.map((g) => `<option value="${g.id}">${esc(g.name)} (${g.count})</option>`).join('');
-      if (cur) $('qWGroup').value = cur;
-    }
     function renderPills() {
-      const gsel = $('qWGroup').value;
-      const rows = S.wallets.evm.filter((w) => !gsel || w.groupId === gsel);
       const box = $('qWPills');
       box.innerHTML = '';
-      if (!rows.length) {
+      const all = S.wallets.evm;
+      if (!all.length) {
         box.innerHTML = emptyState({ icon: 'wallets', title: 'No EVM wallets', desc: 'Add wallets first.', action: { label: 'Open Wallets', onclick: "go('wallets')" } });
         QSEL.clear(); syncBtns(); return;
       }
-      const live = new Set(rows.map((w) => w.id));
+      const live = new Set(all.map((w) => w.id));
       [...QSEL].forEach((id) => { if (!live.has(id)) QSEL.delete(id); });
-      box.appendChild(pillList(rows.map((w) => ({ id: w.id, label: w.name })), QSEL, syncBtns));
+      box.appendChild(walletTree(QSEL, { wallets: all, groups: S.wgroups.evm, onChange: syncBtns }));
       syncBtns();
     }
     function syncBtns() {
@@ -236,9 +224,7 @@ page('quick', {
       gate('qGo', n > 0, 'Select at least one wallet');
       qGas();
     }
-    $('qWGroup').onchange = renderPills;
-    $('qWAll').onclick = () => { const g = $('qWGroup').value; S.wallets.evm.filter((w) => !g || w.groupId === g).forEach((w) => QSEL.add(w.id)); renderPills(); };
-    $('qWNone').onclick = () => { QSEL.clear(); renderPills(); };
+    renderPills();
 
     function cfgFor(mode) {
       if (!RES) throw new Error('detect a collection first');
