@@ -278,6 +278,7 @@ const routes = {
   'POST /api/mint/start': async (b) => mint.start(
     b.method === 'opensea-api' && !b.address ? b : { ...b, address: addr(b.address, 'contract address') },
   ),
+  'POST /api/mint/seadrop-probe': async (b) => mint.seadropProbe(b.chain || 'robinhood', addr(b.address, 'NFT contract')),
 
   'POST /api/mint/stop': async (b) => ({ ok: mint.stop(b.runId) }),
   'POST /api/mint/stop-all': async () => ({ stopped: mint.stopAll() }),
@@ -306,9 +307,9 @@ const routes = {
     const ranks = await nftview.buildRarityFromTraits(info.osChain, info.address, info.slug);
     return { ok: true, slug: info.slug, count: ranks ? Object.keys(ranks).length : 0 };
   },
-  'POST /api/nft/floorwar/start': async (b) => nftops.startFloorWar(b),
-  'POST /api/nft/floorwar/stop': async (b) => ({ ok: nftops.stopFloorWar(b.id) }),
-  'GET /api/nft/floorwar': async () => nftops.listFloorWars(),
+  'POST /api/nft/autoaccept/start': async (b) => nftops.startAutoAccept(b),
+  'POST /api/nft/autoaccept/stop': async (b) => ({ ok: nftops.stopAutoAccept(b.id) }),
+  'GET /api/nft/autoaccept': async () => nftops.listAutoAccepts(),
   'POST /api/nft/sniper/start': async (b) => sniper.startSniper(b),
   'POST /api/nft/sniper/stop': async (b) => ({ ok: sniper.stopSniper(b.id) }),
   'GET /api/nft/sniper': async () => sniper.listSnipers(),

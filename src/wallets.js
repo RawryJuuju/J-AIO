@@ -11,6 +11,12 @@ function save(kind, d) { return store.writeSealed(KIND[kind], d); }
 
 function nid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
+const addr = (v, label) => {
+  const s = String(v || '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(s)) throw new Error(`${label || 'address'} is not a valid address`);
+  return ethers.getAddress(s);
+};
+
 
 function addGroup(kind, name) {
   const d = load(kind);
@@ -490,7 +496,7 @@ async function consolidate(chainKey, walletIds, destination, opts = {}) {
       const p = rpc.provider(urls[(i + j) % urls.length], c.id);
       try {
         const signer = new ethers.Wallet(w.pk);
-        const nonce = await p.getTransactionCount(w.address, 'pending');
+        const nonce = await rpc.readAny(chainKey, (pp) => pp.getTransactionCount(w.address, 'pending'), urls);
         if (tokenAddr) {
           const bal = await p.call({ to: tokenAddr, data: ERC20_ABI.encodeFunctionData('balanceOf', [w.address]) }).then((r) => ERC20_ABI.decodeFunctionResult('balanceOf', r)[0]);
           if (bal <= 0n) { out.push({ address: w.address, skipped: 'no tokens' }); return; }
@@ -501,11 +507,13 @@ async function consolidate(chainKey, walletIds, destination, opts = {}) {
           const res = await rpc.broadcast(chainKey, raw, urls);
           out.push({ address: w.address, amount: fmt(bal), token: tokenAddr, hash: res.hash });
         } else {
-          const bal = await p.getBalance(w.address);
+          const bal = await rpc.readAny(chainKey, (pp) => pp.getBalance(w.address), urls);
           let gasLimit = 21000n;
           try { const est = await p.estimateGas({ from: w.address, to: destination, value: 0n }); if (est > gasLimit) gasLimit = est; }
           catch { /* keep */ }
-          const gasCost = gasLimit * maxFeePerGas;
+          // OP-stack chains charge an extra L1 data fee not covered by gasLimit*maxFee
+          const l1Pad = c.weth === '0x4200000000000000000000000000000000000006' ? ethers.parseEther('0.000002') : 0n;
+          const gasCost = gasLimit * maxFeePerGas + l1Pad;
           const value = bal - gasCost - leave;
           if (value <= 0n) { out.push({ address: w.address, skipped: 'dust' }); return; }
           const raw = await signer.signTransaction({ chainId: c.id, to: destination, value, nonce, gasLimit, maxFeePerGas, maxPriorityFeePerGas, type: 2 });

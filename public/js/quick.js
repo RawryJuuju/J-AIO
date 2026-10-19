@@ -237,7 +237,7 @@ page('quick', {
         pricePerNft: $('qPrice').value || '0',
         walletIds: [...QSEL],
         mode, maxRetries: 3, stopOnSoldOut: true,
-        tipMultiplier: 2,
+        tipMultiplier: 2, spamCount: 20,
       };
       if (RES.mintMethod === 'opensea-api') {
         cfg.method = 'opensea-api';
@@ -326,7 +326,8 @@ page('quick', {
             ${waiting ? `<div class="tile"><div class="k">Fire in</div><div class="v accent" id="qFireIn">${esc(fmtCountdown(qGateInfo.gateMs + qGateInfo.offsetMs - Date.now()))}</div></div>` : ''}
             <div class="tile"><div class="k">Sent</div><div class="v">${c.sent ?? 0}/${c.total ?? 0}</div></div>
             <div class="tile"><div class="k">Minted</div><div class="v ok">${c.confirmed ?? 0}</div></div>
-            <div class="tile"><div class="k">Failed</div><div class="v fail">${c.failed ?? 0}</div></div>`;
+            <div class="tile"><div class="k">Failed</div><div class="v fail">${c.failed ?? 0}</div></div>
+            ${st.fees && Number(st.fees.eth) > 0 ? `<div class="tile"><div class="k">Total fee</div><div class="v">${fx(st.fees.eth, 6)} ETH${S.ethUsd ? ` <span class="mut">$${num(Number(st.fees.eth) * S.ethUsd, 2)}</span>` : ''}</div></div>` : ''}`;
           if (st.results && st.results.length) {
             $('qResults').innerHTML = `<div class="tw" style="margin-top:var(--s3)"><table><thead><tr>
               <th>Wallet</th><th>Result</th><th>Detail</th><th>Tx / error</th></tr></thead><tbody>

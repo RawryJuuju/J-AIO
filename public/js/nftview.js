@@ -746,7 +746,9 @@ page('nftview', {
       modal(`<h3>Transfer ${rows.length} selected NFT(s)</h3>
         <div class="grid g2"><div><label class="f">Mode</label><select id="ctMode"><option value="disperse">Disperse</option><option value="consolidate">Consolidate</option></select></div>
         <div><label class="f">Gas</label><select id="ctGas"><option value="low" selected>Low</option><option value="normal">Normal</option><option value="fast">Fast</option></select></div></div>
-        <label class="f" style="margin-top:var(--s3)">Destination address(es)</label><textarea id="ctTo" class="mono" rows="3" placeholder="One 0x address per line"></textarea>
+        <label class="f" style="margin-top:var(--s3)">My wallets <span class="opt">— check to include</span></label>
+        <div id="ctChecks" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 10px;max-height:150px;overflow:auto;border:1px solid var(--line,#ddd);border-radius:8px;padding:8px">${S.wallets.evm.map((w) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" class="ctChk" value="${esc(w.address)}"> ${esc(w.name || 'wallet')} · ${short(w.address, 5)}</label>`).join('')}</div>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><span class="sm mut" style="white-space:nowrap">Or paste:</span><textarea id="ctTo" class="mono" rows="2" placeholder="Extra 0x addresses, one per line" style="flex:1"></textarea></div>
         <div id="ctQtyWrap"><label class="f">NFTs per destination wallet</label><input id="ctQty" type="number" min="1" value="1"></div>
         <div class="infobox">Disperse distributes selected NFTs across destination wallets. Consolidate sends all selected NFTs to one destination.</div>
         <div id="ctProg" class="sm mut"></div><div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn danger" id="ctGo">Review transfers</button></div>`);
@@ -754,7 +756,9 @@ page('nftview', {
       $('ctMode').onchange = syncMode; syncMode();
       $('ctGo').onclick = async () => {
         const mode = $('ctMode').value;
-        const tos = $('ctTo').value.split(/\s+/).map((x) => x.trim()).filter(Boolean);
+        const tos = [...document.querySelectorAll('.ctChk:checked')].map((c) => c.value)
+          .concat($('ctTo').value.split(/\s+/).map((x) => x.trim()).filter(Boolean))
+          .filter((x, i, a) => a.indexOf(x) === i);
         if (!tos.length) return warn('Destination required');
         if (mode === 'consolidate' && tos.length !== 1) return warn('Consolidate needs one destination');
         if (tos.some((x) => !/^0x[a-fA-F0-9]{40}$/.test(x))) return warn('Invalid destination address');

@@ -6,45 +6,48 @@ page('xmod', {
     el.innerHTML = `
       <h2 class="pt">X Engagement</h2>
       <p class="ps">Batch follow, like, retweet, reply, quote, tweet across accounts.</p>
-      <div class="card">
-        <div class="row">
-          <div style="width:150px"><label class="f">Action</label>
-            <select id="xAct">
+      <div class="row" style="gap:var(--s4)">
+        <div style="flex:0 0 280px;display:flex;flex-direction:column;gap:var(--s3)">
+          <div class="card" style="flex:none">
+            <label class="f">Action</label>
+            <select id="xAct" style="width:100%">
               <option value="follow">Follow</option><option value="unfollow">Unfollow</option>
               <option value="like">Like</option><option value="retweet">Retweet</option>
               <option value="reply">Reply</option><option value="quote">Quote</option>
               <option value="tweet">Tweet</option>
-            </select></div>
-          <div style="flex:1;min-width:220px"><label class="f">Account group</label><select id="xG"></select>
-            <div class="accpick" id="xAccPanel" style="display:none">
+            </select>
+            <div class="row" style="margin-top:var(--s3)">
+              <div style="flex:1"><label class="f">Min delay ms</label><input id="xMin" type="number" value="8000" style="width:100%"></div>
+              <div style="flex:1"><label class="f">Max delay ms</label><input id="xMax" type="number" value="10000" style="width:100%"></div>
+            </div>
+            <div class="infobox" style="margin-top:var(--s2)">Delay randomized 8-10s between actions.</div>
+            <div id="xTargWrap" style="margin-top:var(--s3)"><label class="f">Targets <span class="opt">— one per line, @handle or URL</span></label>
+              <textarea id="xTarg" rows="2" class="mono" style="width:100%"></textarea></div>
+            <div id="xTextWrap" style="display:none;margin-top:var(--s3)"><label class="f">Text <span class="opt">— {wallet} {email} {xhandle} {@xhandle} {discord} per account</span></label>
+              <textarea id="xText" rows="3" style="width:100%"></textarea></div>
+            <div class="row" style="margin-top:var(--s3);justify-content:flex-end">
+              <button class="btn pri lg" id="xGo">Run</button>
+              <button class="btn danger" id="xStop" style="display:none">Stop</button>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s3)">
+          <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <label class="f">Account group</label><select id="xG" style="width:100%"></select>
+            <div class="accpick" id="xAccPanel" style="display:none;margin-top:var(--s2);flex:1;display:flex;flex-direction:column;min-height:0">
               <div class="accpick-head">
                 <label class="chk"><input type="checkbox" id="xSelAll" checked> Select all</label>
                 <span class="accpick-count" id="xSelCount"></span>
               </div>
-              <div class="accpick-list" id="xAccList"></div>
-            </div></div>
-
+              <div class="accpick-search"><input type="text" id="xAccSearch" placeholder="Search accounts..."></div>
+              <div class="accpick-list" id="xAccList" style="flex:1;max-height:none"></div>
+            </div>
+          </div>
+          <div class="card"><h3>Live <span class="sub" id="xTag"></span></h3>
+            <div id="xCounts" class="tiles sm"></div>
+            <div class="con" id="xCon"></div></div>
         </div>
-        <div class="row" style="margin-top:var(--s3)">
-          <div style="flex:1"><label class="f">Min delay ms</label><input id="xMin" type="number" value="8000"></div>
-          <div style="flex:1"><label class="f">Max delay ms</label><input id="xMax" type="number" value="10000"></div>
-        </div>
-        <div class="infobox">Delay randomized 8-10 seconds between actions.</div>
-      </div>
-      <div class="card">
-        <div id="xTargWrap"><label class="f">Targets <span class="opt">— one per line, @handle or tweet URL</span></label>
-          <textarea id="xTarg" rows="2" class="mono"></textarea></div>
-        <div id="xTextWrap" style="display:none"><label class="f">Text <span class="opt">— {wallet} {handle} {name} expand per account</span></label>
-          <textarea id="xText" rows="3"></textarea></div>
-        <div class="row" style="margin-top:var(--s3)">
-          <div style="flex:1"></div>
-          <button class="btn pri lg" id="xGo">Run</button>
-          <button class="btn danger" id="xStop" style="display:none">Stop</button>
-        </div>
-      </div>
-      <div class="card"><h3>Live <span class="sub" id="xTag"></span></h3>
-        <div id="xCounts" class="tiles sm"></div>
-        <div class="con" id="xCon"></div></div>`;
+      </div>`;
 
     let runId = null;
     const con = $('xCon');
@@ -66,15 +69,20 @@ page('xmod', {
     }
     function xRenderAccs() {
       $('xAccPanel').style.display = $('xG').value ? '' : 'none';
-      $('xAccList').innerHTML = xAccs.length
-        ? xAccs.map((a) => {
+      const q = ($('xAccSearch').value || '').toLowerCase();
+      const filtered = q ? xAccs.filter((a) => {
+        const lbl = (a.xHandle || a.name || a.address || '').toLowerCase();
+        return lbl.includes(q);
+      }) : xAccs;
+      $('xAccList').innerHTML = filtered.length
+        ? '<div class="accpick-grid">' + filtered.map((a) => {
             const label = a.xHandle ? '@' + a.xHandle : (a.name || a.gmail || short(a.address, 6));
             return `<label class="accpick-item${a.hasXToken ? '' : ' noauth'}">`
               + `<input type="checkbox" data-id="${a.id}" checked>`
               + `<span class="h">${esc(label)}</span>`
               + `<span class="w">${esc(short(a.address, 5) || '')}</span>`
               + (a.hasXToken ? '' : '<span class="tagx">no X</span>') + '</label>';
-          }).join('')
+          }).join('') + '</div>'
         : '<div class="accpick-empty">No accounts in this group</div>';
       $('xAccList').querySelectorAll('input[data-id]').forEach((c) => { c.onchange = xSyncCount; });
       xSyncCount();
@@ -91,6 +99,7 @@ page('xmod', {
       $('xAccList').querySelectorAll('input[data-id]').forEach((c) => { c.checked = $('xSelAll').checked; });
       xSyncCount();
     };
+    $('xAccSearch').oninput = xRenderAccs;
 
     (async () => {
       const gs = S.agroups && S.agroups.length ? S.agroups : await api('/accounts/groups');

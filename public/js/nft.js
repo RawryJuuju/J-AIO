@@ -174,112 +174,218 @@ function listModal(n, chain) {
   };
 }
 
-page('floorwar', {
-  label: 'Floor War & Offers', group: 'NFT', icon: 'floor',
+page('autoaccept', {
+  label: 'Auto Accept Offer', group: 'NFT', icon: 'offer',
   render(el) {
     el.innerHTML = `
-      <h2 class="pt">Floor War & Offers</h2>
-      <p class="ps">Auto-undercut the floor, or accept the best WETH offer.</p>
-      <div class="grid g2">
-        <div class="card"><h3>New floor war</h3>
-          <div class="grid g2">
-            <div><label class="f">Chain</label><select id="fwChain">${chainOpts('ethereum')}</select></div>
-            <div><label class="f">Collection slug</label><input id="fwSlug" class="mono"></div>
-          </div>
-          <div class="grid g2" style="margin-top:var(--s3)">
-            <div><label class="f">Contract</label><input id="fwC" class="mono" placeholder="0x…"></div>
-            <div><label class="f">NFT ID</label><input id="fwT" class="mono"></div>
-          </div>
-          <div class="grid g3" style="margin-top:var(--s3)">
-            <div><label class="f">Wallet</label><select id="fwW">${S.wallets.evm.map((w) => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select></div>
-            <div><label class="f">My price</label><input id="fwP" class="mono"></div>
-            <div><label class="f">Min price <span class="opt">— floor stop</span></label><input id="fwMin" class="mono"></div>
-          </div>
-          <div class="row" style="margin-top:var(--s3)">
-            <div style="flex:1"><label class="f">Poll ms</label><input id="fwPoll" type="number" value="60000"></div>
-            <button class="btn pri" id="fwGo" style="align-self:flex-end">Start</button>
-            <button class="btn" id="fwFloor" style="align-self:flex-end">Check floor</button>
-          </div>
-          <div class="warnbox">Relisting repeatedly burns nothing on-chain but can undercut you below cost. The min price is your hard stop.</div>
-        </div>
-        <div class="card"><h3>Best offers</h3>
-          <div class="row">
-            <div style="flex:1"><label class="f">Collection slug</label><input id="foSlug" class="mono"></div>
-            <button class="btn" id="foGo" style="align-self:flex-end">Load offers</button>
-          </div>
-          <div id="foOut">${emptyState({ icon: 'floor', title: 'No offers loaded', desc: 'Load collection offers to bid or accept.' })}</div>
+      <h2 class="pt">Auto Accept Offer</h2>
+      <p class="ps">Paste a collection, pick the NFTs to sell, then arm it. Watches funded offers and accepts them automatically — capacity-aware (50 offers + 100 NFTs = only 50 sells), retries until every offer is filled.</p>
+      <div class="card">
+        <div class="row">
+          <div style="width:150px"><label class="f">Chain</label><select id="aaChain">${chainOpts('ethereum')}</select></div>
+          <div style="flex:1;min-width:240px"><label class="f">Collection <span class="opt">— 0x…, slug, or OpenSea URL</span></label><input id="aaIn" class="mono" placeholder="0x…" autocomplete="off"></div>
+          <div style="flex:1;min-width:170px"><label class="f">Wallet group</label><select id="aaGroup"></select></div>
+          <button class="btn pri" id="aaLoad">Load</button>
         </div>
       </div>
-      <div class="card"><h3>Active floor wars</h3><div id="fwList">${emptyState({ icon: 'floor', title: 'No floor wars running', desc: 'Start one to auto-undercut the floor.' })}</div></div>`;
 
-    $('fwFloor').onclick = async () => {
-      try { const r = await api('/nft/floor', { chain: $('fwChain').value, slug: $('fwSlug').value.trim() }); ok('Floor', r.floor != null ? `${r.floor} ETH` : 'no listings'); }
-      catch (e) { err('Failed', e.message); }
+      <div id="aaHead"></div>
+
+      <div class="card"><h3><label class="chk" id="aaAllWrap" style="display:none"><input type="checkbox" id="aaAll"> Select all</label>
+        <span id="aaQuick" style="display:none;margin-left:10px" class="row">
+          ${[10, 20, 30, 40, 50].map((n) => `<button class="btn xs" data-q="${n}">${n}</button>`).join('')}
+        </span>
+        <select id="aaSort" class="hide"><option value="">Sort…</option><option value="rare">Most rare first</option><option value="common">Least rare first</option></select>
+        <span class="sub" id="aaCount"></span></h3>
+        <div id="aaGrid">${emptyState({ icon: 'offer', title: 'No collection loaded', desc: 'Paste a contract address or OpenSea link, pick your wallets, then Load. Click a row to select it.' })}</div>
+      </div>
+
+      <div class="card"><h3>Armed watchers
+        <div class="row" style="margin-left:auto;align-items:flex-end">
+          <div style="display:flex;flex-direction:column;justify-content:flex-end"><label class="f" style="font-size:11px">Min price/NFT</label>
+            <div class="price-input" style="width:150px"><input id="aaMin" class="mono" inputmode="decimal" placeholder="0.0001"><span id="aaCur">ETH</span></div>
+            <div class="sm mut" id="aaMinUsd" style="height:14px;margin-top:2px">&nbsp;</div></div>
+          <div style="display:flex;flex-direction:column;justify-content:flex-end"><label class="f" style="font-size:11px">Poll s</label>
+            <input id="aaPoll" type="number" value="30" style="width:70px;height:34px">
+            <div style="height:14px"></div></div>
+          <button class="btn danger" id="aaGo" style="align-self:flex-end">Arm auto accept</button>
+        </div></h3>
+        <div id="aaJobs">${emptyState({ icon: 'offer', title: 'Nothing armed', desc: 'Load a collection, select NFTs, then arm auto accept.' })}</div></div>`;
+
+    let data = null;
+    const SEL = new Set();
+
+    function fillGroups() {
+      $('aaGroup').innerHTML = '<option value="">All wallets</option>'
+        + S.wgroups.evm.map((g) => `<option value="${g.id}">${esc(g.name)} (${g.count})</option>`).join('');
+    }
+    fillGroups();
+    /* re-sync wallets/groups so freshly added addresses show up without a full reload */
+    api('/wallets?kind=evm').then((r) => {
+      if (!r || !Array.isArray(r.wallets)) return;
+      S.wallets.evm = r.wallets; S.wgroups.evm = r.groups || [];
+      fillGroups();
+    }).catch(() => {});
+
+    function walletIds() {
+      const g = $('aaGroup').value;
+      return S.wallets.evm.filter((w) => !g || w.groupId === g).map((w) => w.id);
+    }
+
+    function head() {
+      if (!data) { $('aaHead').innerHTML = ''; return; }
+      $('aaHead').innerHTML = `<div class="card colhead">
+        <div class="ch-img">${data.image ? `<img src="${esc(data.image)}" alt="">` : icon('col')}</div>
+        <div class="ch-meta">
+          <div class="ch-name">${esc(data.name || data.slug || '—')}<span class="tag mut">${esc(data.chain)}</span></div>
+          <div class="ch-sub"><span class="ch-id">${esc(short(data.address, 8))}</span>
+            ${data.slug ? `<a class="lnk" href="https://opensea.io/collection/${esc(data.slug)}" target="_blank" rel="noreferrer">${icon('external')} OpenSea</a>` : ''}</div>
+        </div>
+        <div class="ch-stats">
+          <div class="ct"><div class="k">Floor</div><div class="v accent">${fx(data.floor, 14)}</div></div>
+          <div class="ct"><div class="k">I hold</div><div class="v">${num(data.count, 0)}</div></div>
+        </div>
+      </div>`;
+    }
+
+    const STABLE_USD = { usdg: 1, usdc: 1, usdt: 1, dai: 1, usd1: 1, pyusd: 1, frax: 1, usds: 1 };
+    const curSym = () => (data && data.floorSymbol) || 'ETH';
+    const curRate = () => (/^w?eth$/i.test(curSym()) ? S.ethUsd : STABLE_USD[curSym().toLowerCase()] ?? null);
+    /* OpenSea-style rarity tiers — same thresholds/colors as Collection Manager */
+    const AA_TIERS = [
+      { name: 'Legendary', color: '#F6A219', max: 0.01 },
+      { name: 'Epic', color: '#A461E4', max: 0.1 },
+      { name: 'Rare', color: '#2081E2', max: 0.25 },
+      { name: 'Common', color: '#8A8F98', max: Infinity },
+    ];
+    function tierColor(rank) {
+      if (rank == null || !data || !data.supply) return '#8A8F98';
+      return AA_TIERS.find((t) => rank / data.supply <= t.max).color;
+    }
+
+    function render() {
+      $('aaCount').textContent = data ? `${data.rows.length} items · ${SEL.size} selected` : '';
+      $('aaAllWrap').style.display = data && data.rows.length ? '' : 'none';
+      $('aaQuick').style.display = data && data.rows.length ? '' : 'none';
+      $('aaSort').classList.toggle('hide', !(data && data.rows.length));
+      if (!data || !data.rows.length) return;
+      $('aaGrid').innerHTML = `<div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>NFT</th><th>Wallet</th></tr></thead><tbody>
+        ${data.rows.map((n, i) => {
+          const rc = n.rarityRank != null ? tierColor(Number(n.rarityRank)) : null;
+          return `<tr data-i="${i}" class="rowpick${SEL.has(i) ? ' on' : ''}" style="cursor:pointer">
+          <td>${n.image ? `<img src="${esc(n.image)}" loading="lazy" decoding="async" width="26" height="26" style="width:26px;height:26px;border-radius:6px;vertical-align:-8px;margin-right:7px">` : ''}<b>#${esc(String(n.tokenId))}</b> <span class="sm mut">${esc(n.name || '')}</span>${rc ? ` <span class="tag" style="color:${rc};border-color:${rc}">r#${num(n.rarityRank, 0)}</span>` : ''}</td>
+          <td class="sm mut">${esc(n.ownerName || short(n.owner, 6))}</td>
+        </tr>`;
+        }).join('')}</tbody></table></div>`;
+      qa('#aaGrid tr.rowpick').forEach((tr) => {
+        tr.onclick = () => { const i = Number(tr.dataset.i); if (SEL.has(i)) SEL.delete(i); else SEL.add(i); render(); };
+      });
+    }
+
+    function pickFirst(n) {
+      SEL.clear();
+      data.rows.slice(0, n).forEach((_, i) => SEL.add(i));
+      render();
+    }
+    qa('#aaQuick button[data-q]').forEach((b) => { b.onclick = () => pickFirst(Number(b.dataset.q)); });
+
+    let rarityLoaded = false;
+    $('aaSort').onchange = async () => {
+      if (!data) return;
+      const mode = $('aaSort').value;
+      if (!mode) return render();
+      if (!rarityLoaded) {
+        $('aaSort').disabled = true;
+        try {
+          const full = await api('/nft/collection', { chain: data.chain, input: data.slug || data.address, walletIds: walletIds(), market: true });
+          const byId = new Map(full.rows.map((r) => [String(r.tokenId), r.rarityRank]));
+          data.rows.forEach((r) => { r.rarityRank = byId.get(String(r.tokenId)); });
+          rarityLoaded = true;
+        } catch (e) { err('Rarity failed', e.message); $('aaSort').value = ''; $('aaSort').disabled = false; return; }
+        $('aaSort').disabled = false;
+      }
+      const rank = (n) => (n.rarityRank == null ? 1e9 : Number(n.rarityRank));
+      data.rows.sort(mode === 'rare' ? (a, b) => rank(a) - rank(b) : (a, b) => rank(b) - rank(a));
+      render();
     };
 
-    $('fwGo').onclick = async () => {
+    $('aaAll').onchange = () => {
+      SEL.clear();
+      if ($('aaAll').checked) data.rows.forEach((_, i) => SEL.add(i));
+      render();
+    };
+
+    $('aaMin').oninput = () => {
+      const v = Number($('aaMin').value);
+      const r = curRate();
+      $('aaMinUsd').textContent = v && r ? `≈ $${num(v * r, 4)} ${esc(curSym())}` : '';
+    };
+
+    $('aaLoad').onclick = async () => {
+      const input = $('aaIn').value.trim();
+      if (!input) return warn('Paste a contract, slug, or OpenSea link');
+      const ids = walletIds();
+      if (!ids.length) return warn('No wallets in that group');
+      const b = $('aaLoad'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Loading';
       try {
-        await api('/nft/floorwar/start', {
-          chain: $('fwChain').value, slug: $('fwSlug').value.trim(), contract: $('fwC').value.trim(),
-          tokenId: $('fwT').value.trim(), walletId: $('fwW').value,
-          myPrice: $('fwP').value, minPrice: $('fwMin').value, pollMs: Number($('fwPoll').value || 60000),
-        });
-        ok('Floor war started'); refresh();
+        data = await api('/nft/collection', { chain: $('aaChain').value, input, walletIds: ids, market: false, rarity: false });
+        rarityLoaded = false; SEL.clear(); $('aaSort').value = ''; $('aaCur').textContent = curSym(); $('aaMinUsd').textContent = '';
+        head(); render();
+        ok('Loaded', `${data.count} NFT(s) · floor ${fx(data.floor, 14)} ${curSym()}`);
       } catch (e) { err('Failed', e.message); }
+      finally { b.disabled = false; b.textContent = 'Load'; }
     };
 
-    $('foGo').onclick = async () => {
-      const b = $('foGo'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
-      try {
-        const offers = await api('/nft/offers', { chain: $('fwChain').value, slug: $('foSlug').value.trim(), limit: 20 });
-        $('foOut').innerHTML = offers.length ? `<div class="tw"><table><thead><tr><th class="rt">WETH</th><th class="rt">Qty</th><th>Hash</th><th></th></tr></thead><tbody>
-          ${offers.map((o) => `<tr><td class="num"><b>${fx(o.price, 4)}</b></td><td class="num">${esc(String(o.quantity))}</td>
-            <td class="m sm">${esc(short(o.orderHash, 8))}</td>
-            <td class="rt"><button class="btn xs" data-h="${esc(o.orderHash)}" data-p="${esc(String(o.price))}" data-pr="${esc(String(o.protocolAddress || ''))}">accept</button></td></tr>`).join('')}
-          </tbody></table></div>` : emptyState({ icon: 'floor', title: 'No offers', desc: 'This collection has no active offers.' });
-        qa('#foOut button[data-h]').forEach((btn) => {
-          btn.onclick = () => {
-            modal(`<h3>Accept offer</h3><div class="sm mut">${esc(short(btn.dataset.h, 10))} · ${esc(btn.dataset.p)} WETH</div>
-              <label class="f" style="margin-top:var(--s3)">Wallet holding the NFT</label>
-              <select id="aoW">${S.wallets.evm.map((w) => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select>
-              <div class="warnbox">Accepting sells the NFT immediately for WETH. This cannot be undone.</div>
-              <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn danger" id="aoGo">Accept & sell</button></div>`);
-            $('aoGo').onclick = async () => {
-              try {
-                const r = await api('/nft/accept-offer', {
-                  chain: $('fwChain').value, walletId: $('aoW').value, orderHash: btn.dataset.h,
-                  expectedPrice: btn.dataset.p, protocolAddress: btn.dataset.pr || undefined,
-                });
-                closeModal(); ok('Accepted', r.hash);
-              }
-              catch (e) { err('Failed', e.message); }
-            };
-          };
-        });
-      } catch (e) { err('Failed', e.message); }
-      finally { b.disabled = false; b.textContent = 'Load offers'; }
+    $('aaGo').onclick = async () => {
+      if (!data) return warn('Load a collection first');
+      const rows = data.rows.filter((_, i) => SEL.has(i));
+      if (!rows.length) return warn('Select NFTs first');
+      modal(`<h3>${icon('offer')} Arm auto accept</h3>
+        <div class="infobox"><b>${rows.length}</b> NFT(s) in <b>${esc(data.name || data.slug)}</b>. Every funded offer that matches gets accepted automatically — capacity-aware, retries on races. This <b>sells your NFTs</b> for real.</div>
+        <div class="warnbox">Irreversible: each fill transfers an NFT and pays gas. Stop only prevents future fills.</div>
+        <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn danger" id="aaArm">Arm it</button></div>`);
+      $('aaArm').onclick = async () => {
+        try {
+          await api('/nft/autoaccept/start', {
+            chain: data.chain, slug: data.slug, contract: data.address,
+            items: rows.map((n) => ({ walletId: n.ownerId, tokenId: String(n.tokenId) })),
+            minPrice: $('aaMin').value.trim() || null,
+            pollMs: Math.max(5, Number($('aaPoll').value || 30)) * 1000,
+          });
+          closeModal(); ok('Armed', `${rows.length} NFT(s) watching for offers`);
+          jobs();
+        } catch (e) { err('Failed', e.message); }
+      };
     };
 
-    async function refresh() {
-      if (S.page !== 'floorwar') return;
+    let lastJobsJson = '';
+    async function jobs() {
+      if (S.page !== 'autoaccept') return;
       try {
-        const list = await api('/nft/floorwar');
-        $('fwList').innerHTML = list.length ? `<div class="tw"><table><thead><tr>
-          <th>Slug</th><th>NFT</th><th class="rt">My price</th><th class="rt">Floor</th><th class="rt">Relists</th><th>Status</th><th></th></tr></thead><tbody>
-          ${list.map((f) => `<tr><td>${esc(f.slug)}</td><td class="m">#${esc(String(f.tokenId))}</td>
-            <td class="num">${fx(f.myPrice, 5)}${S.ethUsd && f.myPrice ? `<span class="uusd">$${num(f.myPrice * S.ethUsd, 2)}</span>` : ''}</td><td class="num">${fx(f.lastFloor, 5)}${S.ethUsd && f.lastFloor ? `<span class="uusd">$${num(f.lastFloor * S.ethUsd, 2)}</span>` : ''}</td><td class="num">${f.relists}</td>
-            <td><span class="tag ${f.running ? 'ok' : 'mut'}">${f.running ? 'running' : 'stopped'}</span></td>
-            <td class="rt">${f.running ? `<button class="btn xs danger" data-stop="${esc(f.id)}">stop</button>` : ''}</td></tr>`).join('')}
-          </tbody></table></div>` : emptyState({ icon: 'floor', title: 'No floor wars running', desc: 'Start one to auto-undercut the floor.' });
-        qa('#fwList button[data-stop]').forEach((b) => {
-          b.onclick = async () => { await api('/nft/floorwar/stop', { id: b.dataset.stop }); warn('Stopped'); refresh(); };
+        const list = await api('/nft/autoaccept');
+        const snap = JSON.stringify(list);
+        if (snap === lastJobsJson) return; /* unchanged — skip DOM rebuild (no jank every 5s) */
+        lastJobsJson = snap;
+        $('aaJobs').innerHTML = list.length ? `<div class="tw" style="max-height:340px;overflow:auto"><table><thead><tr>
+          <th>Collection</th><th class="rt">Selected</th><th class="rt">Left</th><th class="rt">Sold</th><th class="rt">Net</th><th>Status</th><th>Log</th><th></th></tr></thead><tbody>
+          ${list.map((j) => `<tr>
+            <td><b>${esc(j.slug)}</b> <span class="sm mut">${esc(j.chain)}</span></td>
+            <td class="num">${j.selected}</td><td class="num">${j.poolLeft}</td><td class="num ok"><b>${j.soldCount}</b></td>
+            <td class="num">${fx(j.netTotal, 6)}${j.symbol ? ` ${esc(j.symbol)}` : ''}${S.ethUsd ? `<span class="uusd">$${num(j.netTotal * S.ethUsd, 2)}</span>` : ''}</td>
+            <td><span class="tag ${j.running ? 'ok' : 'mut'}">${j.running ? 'armed' : 'done/stopped'}</span></td>
+            <td class="sm mut" style="max-width:280px;font-size:11px;line-height:1.5">${(j.log || []).slice(-4).map((l) => esc(l.msg)).join('<br>')}</td>
+            <td class="rt">${j.running ? `<button class="btn xs danger" data-stop="${esc(j.id)}">stop</button>` : ''}</td>
+          </tr>`).join('')}
+          </tbody></table></div>` : emptyState({ icon: 'offer', title: 'Nothing armed', desc: 'Load a collection, select NFTs, then arm auto accept.' });
+        qa('#aaJobs button[data-stop]').forEach((b) => {
+          b.onclick = async () => { await api('/nft/autoaccept/stop', { id: b.dataset.stop }); warn('Stopped'); jobs(); };
         });
       } catch { /* */ }
     }
-    refresh();
-    let iv = setInterval(refresh, 10000);
+    jobs();
+    let iv = setInterval(jobs, 5000);
     el._hide = () => { clearInterval(iv); iv = null; };
-    el._show = () => { if (!iv) { refresh(); iv = setInterval(refresh, 10000); } };
+    el._show = () => { if (!iv) { jobs(); iv = setInterval(jobs, 5000); } };
     el._cleanup = el._hide;
   },
 });

@@ -442,7 +442,7 @@ page('wallets', {
     }
 
     $('wBal').onclick = async () => {
-      const rows = visible();
+      const rows = wlist();
       if (!rows.length) return;
       const b = $('wBal'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
       try {
@@ -463,16 +463,35 @@ page('wallets', {
         renderCards(); renderTable();
         const usd = S.ethUsd && sym === 'ETH' ? ` · $${num(total * S.ethUsd, 2)}` : '';
         const rp = sym === 'ETH' && ethIdr(total) != null ? ` · ${idr(ethIdr(total))}` : '';
-        ok('Balances', `${fx(total, 5)} ${sym}${usd}${rp}`);
+        ok('Balances', `${rows.length} wallets · ${fx(total, 5)} ${sym}${usd}${rp}`);
       } catch (e) { err('Balance failed', e.message); }
       finally { b.disabled = false; b.innerHTML = `${icon('refresh')} Balances`; }
     };
 
-    async function reload() { await loadAll(); renderCards(); renderTable(); }
+    async function fetchAllBalances() {
+      const rows = wlist();
+      if (!rows.length) return;
+      try {
+        const body = { kind: WK, addresses: rows.map((w) => w.address), chain: $('wChain').value };
+        const r = await api('/wallets/balances', body);
+        const byAddr = {};
+        (r.balances || r).forEach((x) => { byAddr[x.address] = x; });
+        const sym = wsym();
+        rows.forEach((w) => {
+          const x = byAddr[w.address];
+          if (!x) return;
+          const v = Number(x.balance ?? x.sol ?? x.btc ?? 0);
+          WBAL[WK + ':' + w.address] = { v, sym, usd: v && S.ethUsd && sym === 'ETH' ? v * S.ethUsd : null };
+        });
+        renderCards(); renderTable();
+      } catch { /* silent — manual Balances button shows errors */ }
+    }
+
+    async function reload() { await loadAll(); renderCards(); renderTable(); fetchAllBalances(); }
 
     gate('wTools', WK === 'evm', 'Wallet tools are EVM only');
     renderCards(); renderTable();
-    setTimeout(() => { if ($('wBal')) $('wBal').click(); }, 0);
+    fetchAllBalances();
     el._reload = reload;
   },
 });
@@ -563,7 +582,14 @@ function disperseModal() {
   amtSel.onchange = syncAmt;
   const DSTSEL = new Set();
   const dt = $('dsTree');
-  if (dt) dt.appendChild(walletTree(DSTSEL, { wallets: (S.wallets[WK] || []).filter((w) => w.id !== $('dsFrom').value), groups: gs }));
+  const renderTree = () => {
+    const ex = $('dsFrom').value;
+    DSTSEL.delete(ex); /* switching source un-picks it as target */
+    dt.innerHTML = '';
+    dt.appendChild(walletTree(DSTSEL, { wallets: S.wallets[WK] || [], groups: gs, exclude: ex }));
+  };
+  renderTree();
+  $('dsFrom').addEventListener('change', renderTree);
   document.querySelectorAll('.chiprow .chip').forEach((b) => b.onclick = () => { $('dsTok').value = b.dataset.t; });
   $('dsGo').onclick = async () => {
     const b = $('dsGo'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
@@ -619,12 +645,18 @@ function consolidateModal() {
       ${WK === 'evm' ? `<div><label class="f">Chain</label><select id="csChain">${chainOpts(wChainVal())}</select></div>` : '<div></div>'}
     </div>
     <label class="f" style="margin-top:var(--s3)">Destination address</label><input id="csTo" class="mono" placeholder="0x…">
-    ${WK === 'evm' ? `<label class="f" style="margin-top:var(--s3)">ERC-20 token <span class="opt">— blank = sweep native</span></label><input id="csTok" class="mono" placeholder="0x…">` : ''}
+    ${WK === 'evm' ? `<label class="f" style="margin-top:var(--s3)">ERC-20 token <span class="opt">— blank = sweep native</span></label>
+      <div style="display:flex;gap:8px"><input id="csTok" class="mono" placeholder="0x…" style="flex:1"><button class="btn" id="csWeth" title="Fill with this chain's WETH">Use WETH</button></div>` : ''}
     <div class="grid g2" style="margin-top:var(--s3)">
       <div><label class="f">Leave behind <span class="opt">— dust buffer (native)</span></label><input id="csKeep" placeholder="0"></div>
     </div>
     <div class="infobox" style="margin-top:var(--s3)">Sends the full balance minus gas from every wallet in the group. Token mode sweeps the whole token balance (gas still paid in native).</div>
     <div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" id="csGo">Consolidate</button></div>`);
+  if (WK === 'evm') $('csWeth').onclick = () => {
+    const c = (S.chains || []).find((x) => x.key === ($('csChain') ? $('csChain').value : ''));
+    if (c && c.weth) $('csTok').value = c.weth;
+    else err('No WETH', `${c ? esc(c.name) : 'chain'} has no WETH address configured`);
+  };
   $('csGo').onclick = async () => {
     const b = $('csGo'); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
     try {

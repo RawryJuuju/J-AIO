@@ -319,14 +319,18 @@ async function collection(chainKey, input, walletList, opts = {}) {
 
   const [stats, invByWallet, listings] = await Promise.all([
     collectionStats(info.slug),
-    Promise.all(walletList.map((w) => {
+    mapLimit(walletList, 8, async (w) => {
       const ck = `inv:${chainKey}:${String(w.address).toLowerCase()}:${info.slug}`;
       const hit = cacheGet(ck);
       if (hit) return hit;
-      return nftops.inventory(chainKey, [w.address], {
+      const fetchInv = () => nftops.inventory(chainKey, [w.address], {
         collection: info.slug, maxPages: opts.maxPages || 4,
-      }).then((r) => cacheSet(ck, r, TTL.owner)).catch(() => []);
-    })),
+      });
+      let r = null;
+      try { r = await fetchInv(); }
+      catch { /* rate-limited or proxy hiccup — one retry before giving up as empty */ await new Promise((res) => setTimeout(res, 800)); try { r = await fetchInv(); } catch { r = []; } }
+      return r && r.length ? cacheSet(ck, r, TTL.owner) : r || [];
+    }),
     wantMarket ? allListings(info.slug).catch(() => null) : Promise.resolve(null),
   ]);
 

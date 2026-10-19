@@ -267,8 +267,10 @@ function walletTree(sel, opts) {
   wrap.className = 'wtree';
   const wallets = opts.wallets || [];
   const groups = opts.groups || [];
-  const groupOf = (gid) => wallets.filter((w) => w.groupId === gid);
-  const allIds = () => new Set(wallets.map((w) => w.id));
+  const excl = opts.exclude || null; /* rendered as a disabled row (e.g. disperse source) */
+  const usable = excl ? wallets.filter((w) => w.id !== excl) : wallets;
+  const groupOf = (gid) => usable.filter((w) => w.groupId === gid);
+  const allIds = () => new Set(usable.map((w) => w.id));
   const grpIds = (gid) => new Set(groupOf(gid).map((w) => w.id));
   const any = (ids) => [...ids].some((id) => sel.has(id));
   const all = (ids) => ids.size > 0 && [...ids].every((id) => sel.has(id));
@@ -316,7 +318,23 @@ function walletTree(sel, opts) {
     exp.onclick = (e) => { e.preventDefault(); e.stopPropagation(); wBox.classList.toggle('open'); exp.classList.toggle('on'); };
 
     const wBox = document.createElement('div');
-    wBox.className = 'wt-wallets';
+    wBox.className = 'wt-wallets open'; /* expanded by default */
+    exp.classList.add('on');
+    const exclHere = excl ? wallets.find((w) => w.id === excl && w.groupId === g.id) : null;
+    if (exclHere) {
+      const xRow = document.createElement('label');
+      xRow.className = 'wt-row wt-wal';
+      xRow.title = 'source wallet — excluded';
+      const xC = document.createElement('input');
+      xC.type = 'checkbox'; xC.disabled = true;
+      const xLbl = document.createElement('span');
+      xLbl.className = 'wt-lbl'; xLbl.textContent = exclHere.name || short(exclHere.address, 6);
+      xLbl.style.opacity = '.45'; xLbl.style.textDecoration = 'line-through';
+      const xAddr = document.createElement('span');
+      xAddr.className = 'wt-addr'; xAddr.textContent = short(exclHere.address, 4);
+      xRow.append(xC, xLbl, xAddr);
+      wBox.appendChild(xRow);
+    }
     for (const w of gRows) {
       const wRow = document.createElement('label');
       wRow.className = 'wt-row wt-wal';

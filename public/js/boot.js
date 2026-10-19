@@ -8,7 +8,7 @@ async function stopRun(id, isSol) {
 }
 
 const NAV_ORDER = ['Overview', 'Minting', 'NFT', 'Wallets', 'Identity', 'Infra'];
-const PAGE_ORDER = ['quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'floorwar', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
+const PAGE_ORDER = ['quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'autoaccept', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
 
 function renderNav() {
   const nav = $('nav');
@@ -54,6 +54,7 @@ function go(key) {
   const prevKey = S.page;
   if (prevKey && prevKey !== key && PAGE_ELS[prevKey]) {
     hidePage(PAGE_ELS[prevKey]);
+    PAGE_ELS[prevKey].classList.add('off'); /* keep :has(fit) from matching hidden pages */
     PAGE_ELS[prevKey].style.display = 'none';
   }
   S.page = key;
@@ -66,6 +67,7 @@ function go(key) {
     try { PAGES[key].render(el); } catch (e) { el.innerHTML = `<div class="failbox">Render error: ${esc(e.message)}</div>`; }
     PAGE_ELS[key] = el;
   } else {
+    el.classList.remove('off');
     el.style.display = '';
     showPage(el);
   }

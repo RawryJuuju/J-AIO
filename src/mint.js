@@ -105,7 +105,9 @@ async function resolveGas(chainKey, cfg) {
 }
 
 async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balances, gas, urls, c, signedList }) {
-  const want = walletList.filter((w) => balances[w.address] !== 0n && nonces[w.address] != null);
+  const mintVal = ethers.parseEther(String(cfg.pricePerNft || '0')) * BigInt(cfg.amount || 1);
+  const minRequired = mintVal + (gas.gasLimit * gas.maxFeePerGas * 11n / 10n);
+  const want = walletList.filter((w) => balances[w.address] != null && balances[w.address] >= minRequired && nonces[w.address] != null);
   const failed = new Set();
   const deadline = Date.now() + 90000;
   const GQL_CHUNK = 250, V2_CONC = 10;
@@ -160,11 +162,14 @@ async function fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balance
   const signedSet = () => new Set(signedList.map((s) => s.w.address));
   let gqlWins = 0, v2Wins = 0;
   let lastGuardCheck = 0;
+  // grace for the pre-gate window: lead + chain offset — without it the guard
+  // aborts "not open yet" a few seconds before the gate (DUNLAPS 2026-08-29)
+  const liveGraceS = Math.ceil((Number(cfg.fcfsLeadMs || 1500) + Math.abs(Number(cfg._offsetMs || 0))) / 1000) + 1;
 
   while (!state.stopped && signedList.length + failed.size < want.length && Date.now() < deadline) {
     if (cfg.stageId && Date.now() - lastGuardCheck > 10000) {
       lastGuardCheck = Date.now();
-      try { await verifyDropStage(cfg, 'live', emit, runId); }
+      try { await verifyDropStage(cfg, 'live', emit, runId, null, liveGraceS); }
       catch (e) {
         state.stopped = true;
         state.status = 'aborted';
@@ -234,6 +239,22 @@ async function buildCall(cfg, account, ctx) {
     if (cfg.hexSelfPad) data = data.replace(new RegExp(cfg.hexSelfPad.replace(/^0x/, ''), 'gi'), account.address.slice(2).toLowerCase());
     return { to: cfg.address, data, value };
   }
+  if (cfg.method === 'seadrop-snipe') {
+    const nftContract = cfg.address;
+    if (!nftContract) throw new Error('NFT contract address required');
+    const feeRecipient = cfg.feeRecipient || '0x0000a26b00c1f0df003000390027140000faa719';
+    const minterIfNotPayer = '0x0000000000000000000000000000000000000000';
+    const qty = BigInt(cfg.amount || 1);
+    const seadropAddr = cfg.seadropContract || '0x00005EA00Ac477B1030CE78506496e8C2dE24bf5';
+    // mintPublic(address nftContract, address feeRecipient, address minterIfNotPayer, uint256 quantity)
+    const selector = '161ac21f';
+    const nftPad = nftContract.toLowerCase().slice(2).padStart(64, '0');
+    const feePad = feeRecipient.toLowerCase().slice(2).padStart(64, '0');
+    const minterPad = minterIfNotPayer.toLowerCase().slice(2).padStart(64, '0');
+    const qtyPad = qty.toString(16).padStart(64, '0');
+    const data = `0x${selector}${nftPad}${feePad}${minterPad}${qtyPad}`;
+    return { to: seadropAddr, data, value };
+  }
   let abi = cfg.abi;
   if (!abi) {
     try {
@@ -265,7 +286,7 @@ function assertValueOk(cfg, valueWei) {
   }
 }
 
-async function verifyDropStage(cfg, mode, emit, runId, refStartTs) {
+async function verifyDropStage(cfg, mode, emit, runId, refStartTs, graceS = 0) {
   if (cfg.method !== 'opensea-api' || !cfg.slug || !cfg.stageId) return null;
   let snap;
   try { snap = await launchpads.openseaDropStages(cfg.slug); }
@@ -288,7 +309,7 @@ async function verifyDropStage(cfg, mode, emit, runId, refStartTs) {
     }
     return null;
   }
-  if (st.startTime && now < st.startTime - GUARD_SKEW_S) {
+  if (st.startTime && now < st.startTime - GUARD_SKEW_S - graceS) {
     throw new Error(`STAGE GUARD: stage "${st.label}" not open yet (opens ${new Date(st.startTime * 1000).toISOString()}). Run cancelled — start it closer to the gate.`);
   }
   if (st.endTime && now > st.endTime + GUARD_SKEW_S) {
@@ -521,9 +542,15 @@ async function start(cfg) {
           try { balances[w.address] = await rpc.provider(urls[i % urls.length], c.id).getBalance(w.address); }
           catch { balances[w.address] = null; }
         }));
-        const w0 = walletList.find((w) => balances[w.address] > 0n) || walletList[0];
-        const call0 = await buildCall(cfg, w0, {});
-        const sim = await simulateOne(cfg, w0, call0, gas);
+        const funded = walletList.filter((w) => balances[w.address] > 0n);
+        const candidates = (funded.length ? funded : walletList).slice(0, 3);
+        let sim = null;
+        for (const wc of candidates) {
+          /* a per-wallet revert (eligibility/limit) says nothing about the sale — try another wallet before warning */
+          const call0 = await buildCall(cfg, wc, {});
+          sim = await simulateOne(cfg, wc, call0, gas);
+          if (sim.ok || sim.action === STOP_ALL) break;
+        }
         emit(runId, { level: sim.ok ? 'info' : 'warn', msg: `preflight ${sim.ok ? 'PASS' : 'FAIL: ' + sim.error}`, data: sim });
         if (!sim.ok && sim.action === STOP_ALL && cfg.ignorePreflight !== true) {
           state.status = 'aborted';
@@ -545,10 +572,14 @@ async function start(cfg) {
       for (let i = 0; i < walletList.length; i += CONC) {
         await Promise.all(walletList.slice(i, i + CONC).map(async (w, j) => {
           if (cfg.nonceOverride != null && cfg.nonceOverride !== '') { nonces[w.address] = Number(cfg.nonceOverride); return; }
-          try {
-            const p = rpc.provider(urls[(i + j) % urls.length], c.id);
-            nonces[w.address] = await p.getTransactionCount(w.address, 'pending');
-          } catch { nonces[w.address] = null; }
+          /* try every RPC before giving up — a single dead endpoint must not kill half the fleet */
+          for (const u of urls) {
+            try { nonces[w.address] = await rpc.provider(u, c.id).getTransactionCount(w.address, 'pending'); break; }
+            catch { /* next url */ }
+          }
+          if (nonces[w.address] == null) {
+            try { nonces[w.address] = await rpc.readRace(cfg.chain, (p) => p.getTransactionCount(w.address, 'pending'), urls); } catch { /* stays null */ }
+          }
         }));
       }
       emit(runId, { level: 'info', msg: `nonces fetched (${Object.values(nonces).filter((n) => n != null).length}/${walletList.length})` });
@@ -567,15 +598,39 @@ async function start(cfg) {
           emit(runId, { level: 'fail', wallet: w.name, msg: 'no balance' });
           return;
         }
+        const mintVal = ethers.parseEther(String(cfg.pricePerNft || '0')) * BigInt(cfg.amount || 1);
+        const minBal = mintVal + (gas.gasLimit * gas.maxFeePerGas * 11n / 10n);
+        if (balances[w.address] != null && balances[w.address] < minBal) {
+          state.counts.skipped++;
+          state.results.push({ ok: false, address: w.address, error: 'underfunded' });
+          emit(runId, { level: 'fail', wallet: w.name, msg: `underfunded: has ${ethers.formatEther(balances[w.address])} ETH, need ~${ethers.formatEther(minBal)} ETH` });
+          return;
+        }
         try {
           const call = await buildCall(cfg, w, {});
+          /* instant mode: sale is live NOW — a reverting sim means this wallet can't mint. Skip it instead of broadcasting gas into a revert. */
+          if (!timed && cfg.perWalletSim !== false && state.mode !== 'spam') {
+            const sim = await simulateOne(cfg, w, call, gas);
+            if (!sim.ok && sim.action === SKIP) {
+              state.counts.skipped++;
+              state.results.push({ ok: false, address: w.address, error: `skipped: ${sim.error}` });
+              emit(runId, { level: 'fail', wallet: w.name, msg: `skip (${sim.error})` });
+              return;
+            }
+          }
           const signer = new ethers.Wallet(w.pk);
-          const tx = {
-            chainId: c.id, to: call.to, data: call.data, value: call.value,
-            nonce: nonces[w.address], gasLimit: gas.gasLimit,
-            maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas, type: 2,
-          };
-          signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call, nonce: tx.nonce, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas });
+          const baseNonce = nonces[w.address];
+          /* spam mode: sign N txs with incrementing nonces (Zyper-style) */
+          const spamCount = state.mode === 'spam' ? Math.max(1, Number(cfg.spamCount || cfg.maxTx || 20)) : 1;
+          for (let n = 0; n < spamCount; n++) {
+            const tx = {
+              chainId: c.id, to: call.to, data: call.data, value: call.value,
+              nonce: baseNonce + n, gasLimit: gas.gasLimit,
+              maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas, type: 2,
+            };
+            signedList.push({ w, raw: await signer.signTransaction(tx), value: call.value, call, nonce: tx.nonce, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas });
+          }
+          if (spamCount > 1) emit(runId, { level: 'info', wallet: w.name, msg: `pre-signed ${spamCount} txs (nonces ${baseNonce}..${baseNonce + spamCount - 1})` });
         } catch (e) {
           state.counts.failed++;
           const cl = classify(e);
@@ -772,13 +827,14 @@ async function start(cfg) {
           }
 
           emit(runId, { level: 'info', msg: `FCFS hammer: pulling calldata ${fcfsLeadMs}ms pre-gate (${cfg.osPath === 'v2' ? 'v2 API' : 'gql batch + v2 fallback'})…` });
-          try { await verifyDropStage(cfg, 'live', emit, runId); }
+          try { await verifyDropStage(cfg, 'live', emit, runId, null, Math.ceil((fcfsLeadMs + Math.abs(offsetMs || 0)) / 1000) + 1); }
           catch (e) {
             state.stopped = true;
             state.status = 'aborted';
             emit(runId, { level: 'error', msg: String(e.message || e) });
             return;
           }
+          cfg._offsetMs = offsetMs || 0;
           await fcfsHammer({ cfg, state, runId, emit, walletList, nonces, balances, gas, urls, c, signedList });
           if (state.stopped) { if (state.status !== 'aborted') state.status = 'stopped'; return; }
           if (!signedList.length) {
@@ -835,28 +891,32 @@ async function start(cfg) {
             }
             emit(runId, { level: 'info', msg: `signed ${signedList.length} tx at the gate` });
           }
-          const probe = signedList[0];
           const pollMs = Math.max(50, Number(cfg.monitor?.pollMs || 150));
-          emit(runId, { level: 'info', msg: `gate-polling ${probe.w.name} every ${pollMs}ms…` });
+          emit(runId, { level: 'info', msg: `gate-polling ${signedList.length} wallets every ${pollMs}ms…` });
           let opened = false;
-          while (!state.stopped && Date.now() < targetMs + offsetMs + 90000) {
-            try {
-              await rpc.readRace(cfg.chain, (p) => p.call({ from: probe.w.address, to: probe.call.to, data: probe.call.data, value: probe.value }), urls);
-              opened = true;
-              break;
-            } catch (e) {
-              if (e && e.code !== 'CALL_EXCEPTION') {
-                await new Promise((r) => setTimeout(r, 250));
-                continue;
-              }
-              const cl = classify(e);
-              if (cl.action === STOP_ALL && cfg.stopOnSoldOut !== false) {
-                state.stopped = true;
-                emit(runId, { level: 'error', msg: `STOP ALL (gate): ${cl.reason}` });
-                break;
-              }
+          const PROBE_BATCH = 4;
+          while (!state.stopped && Date.now() < targetMs + offsetMs + 90000 && !opened) {
+            /* probe several signed wallets per tick — an ineligible first wallet must not blind the gate */
+            for (let base = 0; base < signedList.length && !opened && !state.stopped; base += PROBE_BATCH) {
+              const verdicts = await Promise.all(signedList.slice(base, base + PROBE_BATCH).map(async (s2) => {
+                try {
+                  await rpc.readRace(cfg.chain, (p) => p.call({ from: s2.w.address, to: s2.call.to, data: s2.call.data, value: s2.value }), urls);
+                  return 'open';
+                } catch (e) {
+                  if (e && e.code !== 'CALL_EXCEPTION') return 'flaky';
+                  const cl = classify(e);
+                  if (cl.action === STOP_ALL && cfg.stopOnSoldOut !== false) {
+                    state.stopped = true;
+                    emit(runId, { level: 'error', msg: `STOP ALL (gate): ${cl.reason}` });
+                    return 'stop';
+                  }
+                  return 'closed';
+                }
+              }));
+              if (verdicts.includes('open')) opened = true;
+              else if (verdicts.includes('stop')) break;
             }
-            preciseSleep(Math.min(pollMs, Math.max(20, targetMs + offsetMs - Date.now())));
+            if (!opened && !state.stopped) preciseSleep(Math.min(pollMs, Math.max(20, targetMs + offsetMs - Date.now())));
           }
           if (state.stopped) { state.status = 'stopped'; return; }
           if (!opened) {
@@ -974,6 +1034,11 @@ async function trackReceipts(runId, cfg, state, urls) {
           const feeEth = rec.gasPrice ? ethers.formatEther(rec.gasUsed * rec.gasPrice) : null;
           r.feeEth = feeEth;
           r.tokenId = tokenIdFromReceipt(rec);
+          /* spam mode: first confirm → stop all remaining txs */
+          if (state.mode === 'spam') {
+            state.stopped = true;
+            emit(runId, { level: 'ok', msg: `SPAM WIN — confirmed ${r.hash.slice(0, 16)}… block ${rec.blockNumber}${r.tokenId ? ` #${r.tokenId}` : ''}${feeEth ? ` fee ${Number(feeEth).toFixed(6)}` : ''}`, hash: r.hash });
+          }
           const priceEth = ethers.formatEther(
             ethers.parseEther(String(cfg.pricePerNft || '0')) * BigInt(cfg.amount || 1),
           );
@@ -1020,7 +1085,12 @@ function stopAll() {
 function status(runId) {
   const r = runs.get(runId);
   if (!r) return null;
-  return { id: r.id, status: r.status, mode: r.mode, counts: r.counts, started: r.started, name: r.cfg.name, chain: r.cfg.chain, address: r.cfg.address, gateMs: r.gateMs, offsetMs: r.offsetMs || 0, results: r.results.slice(-400).map(stripSensitive) };
+  let feeWei = 0n;
+  for (const x of r.results) {
+    if (x.pending || !x.gasUsed || !x.effectiveGasPrice) continue;
+    try { feeWei += BigInt(x.gasUsed) * BigInt(x.effectiveGasPrice); } catch { /* skip */ }
+  }
+  return { id: r.id, status: r.status, mode: r.mode, counts: r.counts, started: r.started, name: r.cfg.name, chain: r.cfg.chain, address: r.cfg.address, gateMs: r.gateMs, offsetMs: r.offsetMs || 0, fees: { wei: feeWei.toString(), eth: ethers.formatEther(feeWei) }, results: r.results.slice(-400).map(stripSensitive) };
 }
 
 function stripSensitive(x) {
@@ -1046,9 +1116,85 @@ function clearFinished() {
 }
 
 
+async function seadropProbe(chainKey, nftAddress) {
+  const c = chainsMod.chain(chainKey);
+  const urls = rpc.urlsFor(chainKey);
+  const prov = rpc.provider(urls[0], c.id);
+  const SEADROP = '0x00005EA00Ac477B1030CE78506496e8C2dE24bf5';
+
+  const result = { nftContract: nftAddress, seadropContract: SEADROP, chain: chainKey, chainId: c.id, priceWei: null, timestamps: null, maxPerWallet: null, supply: null, minted: null };
+
+  // totalSupply
+  try {
+    const ts = await prov.call({ to: nftAddress, data: '0x18160ddd' });
+    result.minted = Number(BigInt(ts));
+  } catch { /* unverified */ }
+
+  // maxSupply
+  try {
+    const ms = await prov.call({ to: nftAddress, data: '0xd5abeb01' });
+    result.supply = Number(BigInt(ms));
+  } catch { /* unverified */ }
+
+  // try mintPublic simulation with 0.002 ETH (common RH price) to extract timestamps from revert
+  const selector = '161ac21f';
+  const nftPad = nftAddress.toLowerCase().slice(2).padStart(64, '0');
+  const feePad = '0000000000000000000000000000a26b00c1f0df003000390027140000faa719';
+  const minterPad = '0000000000000000000000000000000000000000000000000000000000000000';
+  const qtyPad = '0000000000000000000000000000000000000000000000000000000000000001';
+  const calldata = `0x${selector}${nftPad}${feePad}${minterPad}${qtyPad}`;
+  const testValue = ethers.parseEther('0.002');
+
+  try {
+    await prov.call({ from: '0x0000000000000000000000000000000000000001', to: SEADROP, data: calldata, value: testValue });
+    result.openNow = true;
+  } catch (e) {
+    const msg = String(e?.shortMessage || e?.message || '');
+    // extract timestamps from NotActive revert (0x13da22f2 + 3 uint256)
+    const data = e?.data || e?.receipt?.data || '';
+    if (typeof data === 'string' && data.startsWith('0x13da22f2')) {
+      const ts1 = parseInt(data.slice(10, 74), 16);
+      const ts2 = parseInt(data.slice(74, 138), 16);
+      const ts3 = parseInt(data.slice(138, 202), 16);
+      if (ts1 > 1e9) result.publicStart = ts1;
+      if (ts2 > 1e9) result.publicEnd = ts2;
+      if (ts3 > 1e9) result.publicEnd = ts3;
+      result.timestamps = { start: ts1, mid: ts2, end: ts3 };
+    }
+    // try extract from err.message hex blob
+    const hexMatch = msg.match(/0x13da22f2([0-9a-f]{192})/);
+    if (hexMatch) {
+      const h = hexMatch[1];
+      const ts1 = parseInt(h.slice(0, 64), 16);
+      const ts2 = parseInt(h.slice(64, 128), 16);
+      const ts3 = parseInt(h.slice(128, 192), 16);
+      if (ts1 > 1e9) result.publicStart = ts1;
+      if (ts2 > 1e9) result.publicEnd = ts2;
+      if (ts3 > 1e9) result.publicEnd = ts3;
+      result.timestamps = { start: ts1, mid: ts2, end: ts3 };
+    }
+    if (/0xe12d2314|0xc30436e9|sold out/i.test(msg)) result.soldOut = true;
+  }
+
+  // price check via getPublicDrop (0x6d5e40d6)
+  try {
+    const pd = await prov.call({ to: SEADROP, data: '0x6d5e40d6' + nftPad });
+    if (pd && pd !== '0x' && pd.length > 2) {
+      // decode: price is first uint256 after slot offset
+      const priceHex = pd.slice(2 + 24, 2 + 64); // rough extraction
+      const priceVal = BigInt('0x' + priceHex);
+      if (priceVal > 0n && priceVal < ethers.parseEther('10')) {
+        result.priceWei = priceVal.toString();
+      }
+    }
+  } catch { /* no public drop configured yet */ }
+
+  return result;
+}
+
+
 async function gasCalc(chainKey, gasLimit, gweiList, nftCount, pricePerNft) {
   const fee = await wallets.feeData(chainKey);
-  const gl = BigInt(gasLimit || 300000);
   const gweis = (gweiList && gweiList.length ? gweiList : [Number(ethers.formatUnits(fee.maxFeePerGas, 'gwei'))]);
   const price = ethers.parseEther(String(pricePerNft || '0'));
   const n = BigInt(nftCount || 1);
@@ -1102,4 +1248,4 @@ async function gasCalc(chainKey, gasLimit, gweiList, nftCount, pricePerNft) {
   };
 }
 
-module.exports = { start, stop, stopAll, status, list, events, clearFinished, bus, classify, simulateOne, buildCall, flashbotsSend, flashbotsPrivate, resolveGas, gasCalc, FLASHBOTS_RELAYS, GAS_PRESETS, chainClockOffset, measureBlockMs, probeGateStart, gateCallAtTime, verifyDropStage, assertValueOk, expectedValueWei };
+module.exports = { start, stop, stopAll, status, list, events, clearFinished, bus, classify, simulateOne, buildCall, flashbotsSend, flashbotsPrivate, resolveGas, gasCalc, seadropProbe, FLASHBOTS_RELAYS, GAS_PRESETS, chainClockOffset, measureBlockMs, probeGateStart, gateCallAtTime, verifyDropStage, assertValueOk, expectedValueWei };

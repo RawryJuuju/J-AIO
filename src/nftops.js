@@ -6,6 +6,9 @@ const rpc = require('./rpc');
 const wallets = require('./wallets');
 const keys = require('./keys');
 const fxrate = require('./fxrate');
+const proxiesMod = require('./proxies');
+let proxyRR = 0;
+const proxyAgents = new Map();
 
 const SEAPORT = '0x0000000000000068F116a894984e2DB1123eB395'; // Seaport 1.6
 const SEAPORT_1_5 = '0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC';
@@ -51,11 +54,31 @@ async function osFetch(path, opts = {}) {
   let last = null;
   for (let i = 0; i < attempts; i++) {
     const key = keys.require('openseaKey', 'OpenSea API key');
-    const r = await fetch(`https://api.opensea.io${path}`, {
+    /* round-robin over LIVE proxies from the Proxies page; direct when none exist */
+    let dispatcher;
+    try {
+      const live = proxiesMod.load().groups.flatMap((g) => g.proxies || []).filter((p) => p.healthy);
+      if (live.length) {
+        const p = live[proxyRR++ % live.length];
+        const url = proxiesMod.toUrl(p);
+        let a = proxyAgents.get(url);
+        if (!a) { a = new (require('undici').ProxyAgent)(url); proxyAgents.set(url, a); }
+        dispatcher = a;
+      }
+    } catch { /* sealed store locked or no proxies — go direct */ }
+    const doFetch = (disp) => fetch(`https://api.opensea.io${path}`, {
       method: opts.method || 'GET',
       headers: { 'X-API-KEY': key, accept: 'application/json', ...(opts.body ? { 'content-type': 'application/json' } : {}), ...(opts.headers || {}) },
-      body: opts.body, signal: AbortSignal.timeout(opts.timeout || 25000),
+      body: opts.body, signal: AbortSignal.timeout(opts.timeout || 25000), ...(disp ? { dispatcher: disp } : {}),
     });
+    let r;
+    try {
+      r = await doFetch(dispatcher);
+    } catch (e) {
+      /* proxy dead/misbehaving (undici 'fetch failed') → retry direct so a stale proxy never kills the op */
+      if (!dispatcher) throw e;
+      try { r = await doFetch(null); } catch (e2) { throw e2; }
+    }
     const t = await r.text();
     let d = null; try { d = JSON.parse(t); } catch { /* html */ }
     if (r.ok) return d;
@@ -987,12 +1010,17 @@ async function cancelBatch(chainKey, items, opts = {}) {
       const p = (order.protocol_data && order.protocol_data.parameters) || order.parameters;
       if (!p || !p.offerer) return { i, error: `no live listing on #${it.tokenId}` };
       return { i, p };
-    } catch (e) { return { i, error: String(e.message).slice(0, 100) }; }
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (/404|Not Found|no live listing/i.test(msg)) return { i, skip: true };
+      return { i, error: msg.slice(0, 100) };
+    }
   });
 
   const byWallet = {};
   for (const f of fetched) {
     const oi = origIdx[f.i];
+    if (f.skip) { out[oi] = { tokenId: valid[f.i].tokenId, ok: true, skipped: true }; continue; }
     if (f.error) { out[oi] = { tokenId: valid[f.i].tokenId, error: f.error }; continue; }
     const w = wallets.getWallet('evm', valid[f.i].walletId);
     if (!w || String(f.p.offerer).toLowerCase() !== w.address.toLowerCase()) {
@@ -1049,20 +1077,134 @@ async function cancelBatch(chainKey, items, opts = {}) {
 }
 
 
-function countDecimals(x) {
-  const s = String(x);
-  return s.includes('.') ? s.split('.')[1].replace(/0+$/, '').length : 0;
+/* ---- Auto Accept Offer watcher ----
+ * Polls funded collection offers, matches them against the user-selected NFT
+ * pool (criteria-aware), and bulk-accepts respecting per-offer capacity.
+ * Failed/raced fills stay in the pool and retry next tick until sold or stopped. */
+const autoAccepts = new Map();
+
+function criteriaIdsOf(criteria) {
+  try {
+    const enc = criteria && (criteria.encodedTokenIds || criteria.encoded_token_ids);
+    if (!enc) return null;
+    const bin = Buffer.from(String(enc), 'base64');
+    if (!bin.length || bin.length % 32) return null;
+    const ids = [];
+    for (let i = 0; i < bin.length; i += 32) ids.push(BigInt('0x' + bin.subarray(i, i + 32).toString('hex')).toString());
+    return ids.length ? ids : null;
+  } catch { return null; }
 }
 
-function shouldRelist(myPrice, newFloor) {
-  const diff = myPrice - newFloor;
-  if (diff <= 0) return null;
-  const significantChange = -Math.floor(Math.log10(diff));
-  const myDecimals = countDecimals(myPrice);
-  if (significantChange > myDecimals + 5) return null;
-  const maxDecimals = Math.max(countDecimals(myPrice), countDecimals(newFloor));
-  const smallestUnit = Math.pow(10, -(maxDecimals + 1));
-  return parseFloat((newFloor - smallestUnit).toFixed(14));
+function persistAutoAccepts() {
+  try {
+    store.writeSealed('auto_accepts', {
+      t: Date.now(),
+      jobs: [...autoAccepts.values()].map((s) => ({
+        id: s.id, cfg: s.cfg, pool: s.pool, selected: s.selected, running: s.running,
+        soldCount: s.soldCount, netTotal: s.netTotal, symbol: s.symbol, log: s.log.slice(-30),
+      })),
+    });
+  } catch { /* sealed store locked — resume still works within this process */ }
+}
+
+function runAutoAcceptLoop(st) {
+  (async () => {
+    while (st.running) {
+      if (!st.pool.length) { st.running = false; st.log.push({ t: Date.now(), msg: 'pool empty — all NFTs sold' }); persistAutoAccepts(); break; }
+      st.lastTick = Date.now();
+      try {
+        const offers = await bestOffers(st.cfg.chain, st.cfg.slug, { limit: 50 });
+        const minP = st.cfg.minPrice != null && st.cfg.minPrice !== '' ? Number(st.cfg.minPrice) : null;
+        let belowMin = 0;
+        const caps = offers.map((o) => ({
+          o,
+          ids: criteriaIdsOf(o.criteria),
+          left: Math.min(Math.max(1, Number(o.quantity) || 1), o.payableItems != null ? Number(o.payableItems) : Math.max(1, Number(o.quantity) || 1)),
+        })).filter((c) => {
+          if (c.left <= 0) return false;
+          if (minP != null && !(c.o.price != null && c.o.price >= minP)) { belowMin++; return false; }
+          return true;
+        });
+        const matched = [];
+        for (const row of [...st.pool]) {
+          const pick = caps.filter((c) => c.left > 0 && (!c.ids || c.ids.includes(row.tokenId))).sort((a, b) => (b.o.price || 0) - (a.o.price || 0))[0];
+          if (!pick) continue;
+          pick.left--;
+          matched.push({ row, o: pick.o });
+        }
+        /* quiet unless something matched — report only sales/failures.
+         * Offers visible but nothing matched → one diagnostic line so the user knows WHY. */
+        if (!matched.length && offers.length) {
+          st.log.push({ t: Date.now(), msg: `${offers.length} funded offer(s) seen but none usable${belowMin ? ` · ${belowMin} below min ${minP}` : ''}${offers.length - belowMin ? ` · rest target tokens outside your selection` : ''}` });
+        }
+        if (matched.length) {
+          const res = await acceptOffersBulk(st.cfg.chain, matched.map((m) => ({
+            walletId: m.row.walletId, orderHash: m.o.orderHash, contract: st.cfg.contract,
+            tokenId: m.row.tokenId, expectedPrice: String(m.o.price),
+            protocolAddress: m.o.protocolAddress || undefined,
+          })));
+          const keyOf = (oh, tid) => `${String(oh)}|${String(tid)}`;
+          const rowByKey = new Map(matched.map((m) => [keyOf(m.o.orderHash, m.row.tokenId), m.row]));
+          for (const r of res.filter((x) => x.hash)) {
+            const row = rowByKey.get(keyOf(r.orderHash, r.tokenId));
+            if (row) st.pool = st.pool.filter((p) => !(p.walletId === row.walletId && p.tokenId === row.tokenId));
+            st.soldCount++; st.netTotal += Number(r.net || 0); if (r.symbol) st.symbol = r.symbol;
+            st.log.push({ t: Date.now(), msg: `SOLD #${r.tokenId} · net ${Number(r.net).toFixed(6)} ${r.symbol || ''} · tx ${String(r.hash).slice(0, 12)}` });
+          }
+          for (const r of res.filter((x) => x.error)) st.log.push({ t: Date.now(), msg: `fail #${r.tokenId}: ${r.error}` });
+        }
+      } catch (e) { st.log.push({ t: Date.now(), msg: `tick failed: ${String(e.message).slice(0, 120)}` }); }
+      if (st.log.length > 300) st.log.splice(0, st.log.length - 300);
+      persistAutoAccepts();
+      /* back off when rate-limited: double the poll interval (cap 5 min), restore after a clean tick */
+      const lastMsg = st.log.length ? String(st.log[st.log.length - 1].msg || '') : '';
+      if (/429|Rate limit/i.test(lastMsg)) {
+        st.backoffMs = Math.min((st.backoffMs || Number(st.cfg.pollMs || 30000)) * 2, 300000);
+        await new Promise((r) => setTimeout(r, st.backoffMs));
+      } else { st.backoffMs = null; await new Promise((r) => setTimeout(r, Number(st.cfg.pollMs || 30000))); }
+    }
+    persistAutoAccepts();
+  })();
+}
+
+function startAutoAccept(cfg) {
+  if (!cfg.chain || !cfg.slug || !Array.isArray(cfg.items) || !cfg.items.length) throw new Error('chain, slug and items are required');
+  const seen = new Set();
+  const pool = cfg.items
+    .map((i) => ({ walletId: i.walletId, tokenId: String(i.tokenId) }))
+    .filter((i) => { const k = `${i.walletId}|${i.tokenId}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  const id = 'aa' + Date.now().toString(36);
+  const st = { id, cfg, pool, running: true, selected: pool.length, soldCount: 0, netTotal: 0, symbol: null, lastTick: null, log: [] };
+  autoAccepts.set(id, st);
+  runAutoAcceptLoop(st);
+  persistAutoAccepts();
+  return { id };
+}
+
+/* survive restarts: resume watchers that were armed before the process died */
+(function restoreAutoAccepts() {
+  try {
+    const d = store.readSealed('auto_accepts', null);
+    if (!d || !Array.isArray(d.jobs)) return;
+    for (const j of d.jobs) {
+      if (!j.running || !j.cfg || !Array.isArray(j.pool)) continue;
+      const st = { ...j, log: j.log || [] };
+      autoAccepts.set(j.id, st);
+      runAutoAcceptLoop(st);
+      st.log.push({ t: Date.now(), msg: `resumed after restart (${st.pool.length} left in pool)` });
+    }
+  } catch { /* locked or corrupt — skip */ }
+})();
+
+function stopAutoAccept(id) { const s = autoAccepts.get(id); if (!s) return false; s.running = false; persistAutoAccepts(); return true; }
+
+function listAutoAccepts() {
+  return [...autoAccepts.values()].map((s) => ({
+    id: s.id, running: s.running, chain: s.cfg.chain, slug: s.cfg.slug, contract: s.cfg.contract,
+    selected: s.selected, poolLeft: s.pool.length, soldCount: s.soldCount,
+    netTotal: s.netTotal, symbol: s.symbol, pollMs: s.cfg.pollMs, minPrice: s.cfg.minPrice ?? null,
+    lastTick: s.lastTick, log: s.log.slice(-30),
+  }));
 }
 
 async function collectionFloor(chainKey, slug) {
@@ -1113,39 +1255,7 @@ async function collectionListingCurrency(chainKey, slug) {
   return out;
 }
 
-const floorWars = new Map();
 
-function startFloorWar(cfg) {
-  const id = 'fw' + Date.now().toString(36);
-  const st = { id, cfg, running: true, log: [], lastFloor: null, relists: 0 };
-  floorWars.set(id, st);
-  (async () => {
-    while (st.running) {
-      try {
-        const floor = await collectionFloor(cfg.chain, cfg.slug);
-        st.lastFloor = floor;
-        if (floor != null && cfg.minPrice != null && floor <= Number(cfg.minPrice)) {
-          st.log.push({ t: Date.now(), msg: `floor ${floor} at/below min ${cfg.minPrice} — holding` });
-        } else if (floor != null) {
-          const target = shouldRelist(Number(cfg.myPrice), floor);
-          if (target != null && target >= Number(cfg.minPrice || 0)) {
-            try {
-              await listNft(cfg.chain, cfg.walletId, cfg.contract, cfg.tokenId, target, { standard: cfg.standard });
-              cfg.myPrice = target; st.relists++;
-              st.log.push({ t: Date.now(), msg: `relisted at ${target} (floor ${floor})` });
-            } catch (e) { st.log.push({ t: Date.now(), msg: `relist failed: ${String(e.message).slice(0, 120)}` }); }
-          }
-        }
-      } catch (e) { st.log.push({ t: Date.now(), msg: `floor check failed: ${String(e.message).slice(0, 100)}` }); }
-      if (st.log.length > 200) st.log.splice(0, st.log.length - 200);
-      await new Promise((r) => setTimeout(r, Number(cfg.pollMs || 60000)));
-    }
-  })();
-  return { id };
-}
-
-function stopFloorWar(id) { const s = floorWars.get(id); if (!s) return false; s.running = false; return true; }
-function listFloorWars() { return [...floorWars.values()].map((s) => ({ id: s.id, running: s.running, slug: s.cfg.slug, tokenId: s.cfg.tokenId, myPrice: s.cfg.myPrice, lastFloor: s.lastFloor, relists: s.relists, log: s.log.slice(-30) })); }
 
 
 const ADDL_RECIPIENT_TUPLE = '(uint256 amount,address recipient)';
@@ -1503,8 +1613,10 @@ async function _prepareAccept(chainKey, walletId, orderHash, opts = {}) {
   }
 
   if (opts.expectedPrice != null && opts.expectedPrice !== '') {
-    const exp = ethers.parseUnits(String(opts.expectedPrice), 18);
-    if (receiveAmount * 100n < exp * 99n) {
+    /* dust offers: String(Number) can carry >18 fractional digits — parseUnits would NUMERIC_FAULT. Guard is best-effort vs displayed price; skip if unparseable. */
+    let exp = null;
+    try { exp = ethers.parseUnits(String(opts.expectedPrice), 18); } catch { exp = null; }
+    if (exp != null && receiveAmount * 100n < exp * 99n) {
       throw new Error(`refusing: order pays less than the ${opts.expectedPrice} that was displayed`);
     }
   }
@@ -1908,6 +2020,6 @@ module.exports = {
   listNftBulk, cancelBatch,
   extractListingOrder, typesMatch, approvalOperator,
   verifyListingOrder, normalizeOrder, seaportVersion, decodeFulfillCalldata, encodeFromInputData, ORDER_TYPES,
-  shouldRelist, collectionFloor, collectionListingCurrency, startFloorWar, stopFloorWar, listFloorWars,
+  collectionFloor, collectionListingCurrency, startAutoAccept, stopAutoAccept, listAutoAccepts,
   bestOffers, acceptOffer, acceptOffersBulk, previewOfferAccept, tokenInfo, pnl, osFetch,
 };

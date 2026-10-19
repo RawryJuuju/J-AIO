@@ -36,6 +36,7 @@ page('mint', {
             <select id="mMethod">
               <option value="abi">ABI function</option>
               <option value="hex">Raw hex</option>
+              <option value="seadrop-snipe">SeaDrop Snipe</option>
               <option value="opensea-api">OpenSea API (signed)</option>
             </select></div>
         </div>
@@ -52,6 +53,27 @@ page('mint', {
           <textarea id="mParams" rows="2" class="mono" placeholder="{amount}"></textarea></div>
         <div id="mHexWrap" style="display:none"><label class="f">Raw calldata</label>
           <textarea id="mHex" rows="2" class="mono" placeholder="0xa0712d68…"></textarea></div>
+
+        <!-- SeaDrop Snipe panel -->
+        <div id="mSdWrap" style="display:none">
+          <div class="mfg">
+            <div class="mfc6"><label class="f">SeaDrop Contract</label>
+              <input id="mSdAddr" class="mono" value="0x00005EA00Ac477B1030CE78506496e8C2dE24bf5"></div>
+            <div class="mfc6"><label class="f">Fee Recipient <span class="mfh">default if unsure</span></label>
+              <input id="mSdFee" class="mono" value="0x0000a26b00c1f0df003000390027140000faa719"></div>
+          </div>
+          <div class="mfg">
+            <div class="mfc12"><label class="f">Hex Calldata <span class="mfh" id="mSdHexHint">auto-built from contract + qty</span></label>
+              <textarea id="mSdHex" rows="2" class="mono" readonly></textarea></div>
+          </div>
+          <div class="mfg">
+            <div class="mfc6"><label class="f">Window Start</label>
+              <input id="mSdStart" class="mono" placeholder="auto from probe"></div>
+            <div class="mfc6"><label class="f">Window End</label>
+              <input id="mSdEnd" class="mono" placeholder="auto from probe"></div>
+          </div>
+          <div id="mSdInfo" class="infobox" style="margin-bottom:var(--s2)"></div>
+        </div>
 
         <!-- Row 3: proxy + amount + price -->
         <div class="mfg">
@@ -83,14 +105,16 @@ page('mint', {
             <div class="mfu" data-u="gwei"><input id="mTip" class="mono" placeholder="auto"></div></div>
         </div>
 
-        <!-- Row 6: nonce + timestamp + delay -->
+        <!-- Row 6: nonce + timestamp + delay + spam -->
         <div class="mfg">
-          <div class="mfc4"><label class="f">Nonce</label>
+          <div class="mfc3"><label class="f">Nonce</label>
             <input id="mNonce" type="number" placeholder="auto"></div>
-          <div class="mfc4"><label class="f">Timestamp <span class="mfh" id="mTsH"></span></label>
+          <div class="mfc3"><label class="f">Timestamp <span class="mfh" id="mTsH"></span></label>
             <div class="mfu" data-u="s/ms"><input id="mTs" class="mono" placeholder="now"></div></div>
-          <div class="mfc4"><label class="f">Delay</label>
+          <div class="mfc3"><label class="f">Delay</label>
             <div class="mfu" data-u="ms"><input id="mDelay" type="number" value="1000"></div></div>
+          <div class="mfc3"><label class="f">Spam Count <span class="mfh">txs/wallet</span></label>
+            <div class="mfu" data-u="txs"><input id="mSpamCount" type="number" value="20" min="1" max="200"></div></div>
         </div>
 
         <!-- Advanced panel — hidden until toggled (takes 0px closed, so the six
@@ -186,6 +210,7 @@ page('mint', {
       $('mHexWrap').style.display = m === 'hex' ? '' : 'none';
       $('mOsWrap').style.display = m === 'opensea-api' ? '' : 'none';
       $('mFcfsRow').style.display = m === 'opensea-api' ? '' : 'none';
+      $('mSdWrap').style.display = m === 'seadrop-snipe' ? '' : 'none';
       const px = m === 'opensea-api';
       $('mProxy').disabled = !px;
       $('mProxyH').textContent = px ? 'optional · OpenSea API' : 'OpenSea API only';
@@ -463,6 +488,53 @@ page('mint', {
       refreshGas();
     }
 
+    /* SeaDrop Snipe: auto-build hex + probe */
+    function buildSdHex() {
+      if ($('mMethod').value !== 'seadrop-snipe') return;
+      const addr = ($('mUrl').dataset.addr) || ($('mUrl').value.match(/0x[a-fA-F0-9]{40}/) || [])[0];
+      if (!addr) { $('mSdHex').value = ''; $('mSdHexHint').textContent = 'paste NFT contract first'; return; }
+      const feeR = ($('mSdFee').value || '0x0000a26b00c1f0df003000390027140000faa719').toLowerCase().slice(2).padStart(64, '0');
+      const qty = BigInt($('mAmt').value || 1);
+      const nftPad = addr.toLowerCase().slice(2).padStart(64, '0');
+      const hex = '0x161ac21f' + nftPad + feeR + '0000000000000000000000000000000000000000000000000000000000000000' + qty.toString(16).padStart(64, '0');
+      $('mSdHex').value = hex;
+      $('mSdHexHint').textContent = `qty ${qty} · ${hex.length / 2 - 1} bytes`;
+    }
+    ['mAmt', 'mSdFee'].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('input', buildSdHex);
+    });
+    $('mUrl').addEventListener('input', () => { clearTimeout(mDtv); if ($('mMethod').value === 'seadrop-snipe' && looksMintable($('mUrl').value)) mDtv = setTimeout(buildSdHex, 700); });
+    $('mUrl').addEventListener('paste', () => setTimeout(buildSdHex, 30));
+
+    async function probeSeaDrop() {
+      const addr = ($('mUrl').dataset.addr) || ($('mUrl').value.match(/0x[a-fA-F0-9]{40}/) || [])[0];
+      if (!addr) return warn('Paste NFT contract address first');
+      const weiToEth = (wei) => (Number(wei) / 1e18).toFixed(6);
+      try {
+        const r = await api('/mint/seadrop-probe', { chain: $('mChain').value, address: addr });
+        $('mSdInfo').innerHTML = `<b>SeaDrop Snipe</b>`
+          + (r.minted != null ? ` · minted ${esc(String(r.minted))}` : '')
+          + (r.supply ? ` / ${esc(String(r.supply))}` : '')
+          + (r.publicStart ? ` · opens <b>${esc(new Date(r.publicStart * 1000).toLocaleString('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }))} WIB</b>` : '')
+          + (r.publicEnd ? ` · closes <b>${esc(new Date(r.publicEnd * 1000).toLocaleString('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false }))} WIB</b>` : '')
+          + (r.priceWei ? ` · price <b>${esc(weiToEth(r.priceWei))} ETH</b>` : '')
+          + (r.soldOut ? ' · <span class="fail">SOLD OUT</span>' : '')
+          + (r.openNow ? ' · <span class="ok">OPEN NOW</span>' : '');
+        if (r.publicStart) $('mSdStart').value = r.publicStart;
+        if (r.publicEnd) $('mSdEnd').value = r.publicEnd;
+        if (r.publicStart && !($('mTs').value)) {
+          $('mTs').value = r.publicStart;
+          syncTsHint();
+        }
+        if (r.priceWei) {
+          $('mPrice').value = weiToEth(r.priceWei);
+          refreshGas();
+        }
+        buildSdHex();
+      } catch (e) { err('SeaDrop probe failed', e.message); }
+    }
+
     $('mProbe').onclick = async () => {
       const addr = ($('mUrl').dataset.addr) || ($('mUrl').value.match(/0x[a-fA-F0-9]{40}/) || [])[0];
       if (!addr) return warn('No contract address', 'Resolve first');
@@ -511,6 +583,7 @@ page('mint', {
         maxFee: $('mMaxFee').value || null,
         priorityFee: $('mTip').value || null,
         mode, delayMs: Number($('mDelay').value || 0),
+        spamCount: Number($('mSpamCount').value || 20),
         maxRetries: Number($('mRetries').value || 3),
         flashbots: $('mFlash').checked, flashbotsBundle: $('mBundle').checked,
         stopOnSoldOut: $('mSoldOut').checked,
@@ -524,6 +597,12 @@ page('mint', {
         cfg.params = $('mParams').value.split('\n').map((s) => s.trim()).filter((s) => s !== '');
       } else if (method === 'hex') {
         cfg.hex = $('mHex').value.trim();
+      } else if (method === 'seadrop-snipe') {
+        cfg.seadropContract = $('mSdAddr').value.trim() || '0x00005EA00Ac477B1030CE78506496e8C2dE24bf5';
+        cfg.feeRecipient = $('mSdFee').value.trim() || '0x0000a26b00c1f0df003000390027140000faa719';
+        const sdStart = $('mSdStart').value.trim();
+        const sdEnd = $('mSdEnd').value.trim();
+        if (sdStart) cfg.startTimestamp = Number(sdStart);
       } else {
         cfg.slug = $('mSlug').value.trim();
         cfg.fcfs = $('mFcfs').checked;
