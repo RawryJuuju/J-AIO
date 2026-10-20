@@ -63,25 +63,26 @@ page('xmod', {
     let xAccs = [];
     const xSelIds = () => [...$('xAccList').querySelectorAll('input[data-id]:checked')].map((c) => c.dataset.id);
     function xSyncCount() {
+      const all = $('xAccList').querySelectorAll('input[data-id]').length;
       const n = xSelIds().length;
-      $('xSelCount').textContent = n + ' / ' + xAccs.length + ' selected';
-      $('xSelAll').checked = xAccs.length > 0 && n === xAccs.length;
+      $('xSelCount').textContent = n + ' / ' + all + ' selected';
+      $('xSelAll').checked = all > 0 && n === all;
     }
     function xRenderAccs() {
       $('xAccPanel').style.display = $('xG').value ? '' : 'none';
       const q = ($('xAccSearch').value || '').toLowerCase();
-      const filtered = q ? xAccs.filter((a) => {
+      const xOnly = xAccs.filter((a) => a.xHandle);
+      const filtered = q ? xOnly.filter((a) => {
         const lbl = (a.xHandle || a.name || a.address || '').toLowerCase();
         return lbl.includes(q);
-      }) : xAccs;
+      }) : xOnly;
       $('xAccList').innerHTML = filtered.length
         ? '<div class="accpick-grid">' + filtered.map((a) => {
             const label = a.xHandle ? '@' + a.xHandle : (a.name || a.gmail || short(a.address, 6));
             return `<label class="accpick-item${a.hasXToken ? '' : ' noauth'}">`
               + `<input type="checkbox" data-id="${a.id}" checked>`
               + `<span class="h">${esc(label)}</span>`
-              + `<span class="w">${esc(short(a.address, 5) || '')}</span>`
-              + (a.hasXToken ? '' : '<span class="tagx">no X</span>') + '</label>';
+              + `<span class="w">${esc(short(a.address, 5) || '')}</span></label>`;
           }).join('') + '</div>'
         : '<div class="accpick-empty">No accounts in this group</div>';
       $('xAccList').querySelectorAll('input[data-id]').forEach((c) => { c.onchange = xSyncCount; });
