@@ -1195,6 +1195,7 @@ async function seadropProbe(chainKey, nftAddress) {
 
 async function gasCalc(chainKey, gasLimit, gweiList, nftCount, pricePerNft) {
   const fee = await wallets.feeData(chainKey);
+  const gl = BigInt(gasLimit || 250000);
   const gweis = (gweiList && gweiList.length ? gweiList : [Number(ethers.formatUnits(fee.maxFeePerGas, 'gwei'))]);
   const price = ethers.parseEther(String(pricePerNft || '0'));
   const n = BigInt(nftCount || 1);
