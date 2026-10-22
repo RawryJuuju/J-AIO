@@ -51,7 +51,7 @@ page('accounts', {
     function visible() {
       const q = AQ.trim().toLowerCase();
       if (!q) return inGroup();
-      return inGroup().filter((a) => [a.name, a.xHandle, a.discordUsername, a.gmail, a.address]
+      return inGroup().filter((a) => [a.name, a.xHandle, a.discordUsername, a.address]
         .some((v) => v && String(v).toLowerCase().includes(q)));
     }
     function sel() { return visible().filter((a) => ASEL.has(a.id)); }
@@ -172,9 +172,8 @@ page('accounts', {
         <th style="width:34px"><input type="checkbox" id="aSelHdr" aria-label="Select all accounts in view" title="Select all in view"></th>
         <th style="width:15%">Name</th>
         <th style="width:17%">Wallet</th>
-        <th style="width:19%">Google</th>
-        <th style="width:17%">X</th>
-        <th style="width:15%">Discord</th>
+        <th style="width:24%">X</th>
+        <th style="width:19%">Discord</th>
         <th style="width:84px"><span class="sr">Actions</span></th></tr></thead><tbody>
         ${rows.map((a) => {
     const px = pname(a.proxyId);
@@ -182,7 +181,6 @@ page('accounts', {
           <td><input type="checkbox" data-id="${a.id}" ${ASEL.has(a.id) ? 'checked' : ''} aria-label="Select ${esc(a.name)}"></td>
           <td class="nm">${esc(a.name)}${px ? `<div class="sm mut" title="Proxy ${esc(px)}">${esc(px)}</div>` : ''}</td>
           <td>${chainChips(a)}</td>
-          <td>${credCell(a.gmail, a.hasGmailPass, (a.status || {}).gmail)}</td>
           <td>${credCell(a.xHandle ? '@' + a.xHandle : '', a.hasXToken, (a.status || {}).x, ((a.status || {}).x && (a.status || {}).x.ok && (a.status || {}).x.followers != null) ? fmtK((a.status || {}).x.followers) + ' followers' : '')}</td>
           <td>${credCell(a.discordUsername, a.hasDiscordToken, (a.status || {}).discord)}</td>
           <td class="rt"><div class="racts">
@@ -289,7 +287,7 @@ page('accounts', {
     }
 
     function reportProbe(probe) {
-      const LBL = { x: 'X', discord: 'Discord', gmail: 'Gmail' };
+      const LBL = { x: 'X', discord: 'Discord' };
       const keys = Object.keys(probe || {});
       if (!keys.length) return ok('Saved');
       let worst = 'ok';
@@ -312,7 +310,7 @@ page('accounts', {
         const r = await api('/accounts/test', { ids: [id], which: 'all' });
         const row = (Array.isArray(r) ? r[0] : r) || {};
         const probe = {};
-        ['x', 'discord', 'gmail'].forEach((k) => { if (row[k]) probe[k] = row[k]; });
+        ['x', 'discord'].forEach((k) => { if (row[k]) probe[k] = row[k]; });
         await reload();
         if (Object.keys(probe).length) reportProbe(probe);
         else toast('Auth probe', 'nothing to test', 'warn');
@@ -326,10 +324,6 @@ page('accounts', {
         <div class="grid g2">
           <div><label class="f">Name</label><input id="eN" value="${esc(a.name)}"></div>
           <div><label class="f">EVM wallet</label><select id="eW"><option value="">— none —</option>${wopt('evm', a.walletId)}</select></div>
-        </div>
-        <div class="grid g2" style="margin-top:var(--s3)">
-          <div><label class="f">Google account</label><input id="eG" class="mono" value="${esc(a.gmail || '')}" placeholder="name@gmail.com"></div>
-          <div><label class="f">Google app password</label><input id="eGP" type="password" autocomplete="off" placeholder="${a.hasGmailPass ? '•••• stored' : ''}"></div>
         </div>
         <div class="grid g2" style="margin-top:var(--s3)">
           <div><label class="f">X handle</label><input id="eXH" class="mono" value="${esc(a.xHandle || '')}" placeholder="without @"></div>
@@ -347,17 +341,15 @@ page('accounts', {
         const f = {
           name: $('eN').value.trim() || a.name,
           walletId: $('eW').value || null,
-          gmail: $('eG').value.trim(),
           xHandle: $('eXH').value.trim().replace(/^@/, ''),
           discordUsername: $('eDU').value.trim(),
           proxyId: $('eP').value || null,
         };
         const w = S.wallets.evm.find((x) => x.id === $('eW').value);
         f.address = w ? w.address : null;
-        if ($('eGP').value) f.gmailAppPass = $('eGP').value;
         if ($('eXT').value) f.xToken = $('eXT').value.trim();
         if ($('eDT').value) f.discordToken = $('eDT').value.trim();
-        const willProbe = !!(f.xToken || f.discordToken || f.gmailAppPass);
+        const willProbe = !!(f.xToken || f.discordToken);
         const btn = $('agEGo');
         if (willProbe) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Verifying'; }
         try {
@@ -437,11 +429,13 @@ page('accounts', {
       try {
         const r = await api('/accounts/test', { ids, which });
         const list = Array.isArray(r) ? r : [r];
-        const good = list.filter((x) => x.ok).length;
-        toast(label, `${good}/${list.length} valid`, good === list.length ? 'ok' : 'warn');
-        const bad = list.filter((x) => !x.ok);
+        const tested = list.filter((x) => x.tested);
+        const good = tested.filter((x) => x.ok).length;
+        const skipped = list.length - tested.length;
+        toast(label, `${good}/${tested.length} valid${skipped ? ` · ${skipped} skipped (no token)` : ''}`, tested.every((x) => x.ok) ? 'ok' : 'warn');
+        const bad = tested.filter((x) => !x.ok);
         if (bad.length) {
-          const reason = (row) => ['x', 'discord', 'gmail'].filter((k) => row[k] && !row[k].ok)
+          const reason = (row) => ['x', 'discord'].filter((k) => row[k] && !row[k].ok)
             .map((k) => `${k}: ${row[k].error || 'invalid'}`).join(' · ') || row.error || 'invalid';
           modal(`<h3>${esc(label)} — ${bad.length} failing</h3>
             <div class="tw"><table><thead><tr><th>Account</th><th>Error</th></tr></thead><tbody>

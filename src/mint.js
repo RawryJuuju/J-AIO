@@ -609,7 +609,7 @@ async function start(cfg) {
         try {
           const call = await buildCall(cfg, w, {});
           /* instant mode: sale is live NOW — a reverting sim means this wallet can't mint. Skip it instead of broadcasting gas into a revert. */
-          if (!timed && cfg.perWalletSim !== false && state.mode !== 'spam') {
+          if (!timed && cfg.perWalletSim !== false && state.mode !== 'spam' && !cfg.war) {
             const sim = await simulateOne(cfg, w, call, gas);
             if (!sim.ok && sim.action === SKIP) {
               state.counts.skipped++;
@@ -741,7 +741,7 @@ async function start(cfg) {
           : (blockMs != null && blockMs >= 5000 ? 'lead' : 'gate-poll');
         const leadMs = cfg.leadMs != null ? Number(cfg.leadMs) : Math.round(Math.min(Math.max(blockMs || 2000, 1000), 15000));
         const fcfsOn = cfg.method === 'opensea-api' && cfg.fcfs !== false;
-        const fcfsLeadMs = cfg.fcfsLeadMs != null ? Number(cfg.fcfsLeadMs) : 1500;
+        const fcfsLeadMs = cfg.fcfsLeadMs != null ? Number(cfg.fcfsLeadMs) : (cfg.war ? 10000 : 1500);
         let fireLocal = targetMs + offsetMs - (mode === 'lead' ? leadMs : 0);
         emit(runId, { level: 'info', msg: `fire plan: ${mode}${mode === 'lead' ? ` · lead ${(leadMs / 1000).toFixed(1)}s` : ` · poll every ${Math.max(50, Number(cfg.monitor?.pollMs || 150))}ms`} · at ${new Date(fireLocal).toISOString()} local${fcfsOn ? ' · FCFS bundle on' : ''}` });
 

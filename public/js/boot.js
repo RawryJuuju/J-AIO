@@ -8,7 +8,7 @@ async function stopRun(id, isSol) {
 }
 
 const NAV_ORDER = ['Overview', 'Minting', 'NFT', 'Wallets', 'Identity', 'Infra'];
-const PAGE_ORDER = ['quick', 'mint', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'autoaccept', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
+const PAGE_ORDER = ['quick', 'mint', 'war', 'tasks', 'nftview', 'sniper', 'wlcheck', 'projects', 'autoaccept', 'wallets', 'deleg', 'accounts', 'xmod', 'proxies', 'rpc', 'chains', 'settings', 'gas', 'logs'];
 
 function renderNav() {
   const nav = $('nav');
@@ -134,7 +134,7 @@ async function afterUnlock() {
   tickClock();
   setInterval(tickClock, 1000);
   initGasCalculator();
-  const h = location.hash.replace('#', '');
+  const h = location.hash.replace(/^#\/?/, '');
   go(PAGES[h] ? h : 'quick');
 }
 
@@ -185,7 +185,7 @@ $('panicBtn').onclick = () => confirmBox('Stop all runs?',
   }, 'Stop everything');
 
 window.addEventListener('hashchange', () => {
-  const h = location.hash.replace('#', '');
+  const h = location.hash.replace(/^#\/?/, '');
   if (h && PAGES[h] && h !== S.page) go(h);
 });
 

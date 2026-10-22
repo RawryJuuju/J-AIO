@@ -1,7 +1,19 @@
 'use strict';
+const fs = require('fs');
 const store = require('./store');
 const proxies = require('./proxies');
 const wallets = require('./wallets');
+
+// Legacy X sessions remain in credentials; use them read-only for account probes.
+const X_TOKEN_FILE = '/home/ubuntu/credentials/x_tokens.json';
+function externalX(a) {
+  try {
+    const pool = JSON.parse(fs.readFileSync(X_TOKEN_FILE, 'utf8'));
+    const key = String(a.name || '').toUpperCase();
+    const row = pool[key];
+    return row && row.auth_token ? { token: row.auth_token, ct0: row.ct0 || '' } : null;
+  } catch { return null; }
+}
 
 const NAME = 'accounts';
 
@@ -200,7 +212,7 @@ function safe(a) {
     id: a.id, name: a.name, address: a.address, walletId: a.walletId,
     solAddress: a.solAddress || null, btcAddress: a.btcAddress || null,
     gmail: a.gmail, hasGmailPass: !!a.gmailAppPass, hasGmailSession: !!a.gmailSession,
-    xHandle: a.xHandle, hasXToken: !!a.xToken,
+    xHandle: a.xHandle, hasXToken: !!a.xToken || !!externalX(a),
     discordUsername: a.discordUsername, hasDiscordToken: !!a.discordToken,
     proxyId: a.proxyId, status: a.status || {},
   };
@@ -311,11 +323,13 @@ const X_VIEWER_URL = 'https://api.x.com/graphql/HC-1ZetsBT1HKVUOvnLE8Q/Viewer';
 async function testX(accountId) {
   const { fetch } = require('undici');
   const a = getAccount(accountId);
-  if (!a || !a.xToken) return { ok: false, state: 'no_token', error: 'no token' };
+  const ext = a && !a.xToken ? externalX(a) : null;
+  const token = a && (a.xToken || ext?.token);
+  if (!a || !token) return { ok: false, state: 'no_token', error: 'no token' };
   const BEARER = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-  const tok = String(a.xToken).replace(/[^A-Za-z0-9._~%-]/g, '');
+  const tok = String(token).replace(/[^A-Za-z0-9._~%-]/g, '');
   if (!tok) return { ok: false, state: 'bad_token', error: 'token has no valid characters' };
-  const ct0 = /^[a-f0-9]{8,64}$/i.test(String(a.xCt0 || '')) ? a.xCt0 : require('crypto').randomBytes(16).toString('hex');
+  const ct0 = /^[a-f0-9]{8,64}$/i.test(String(a.xCt0 || ext?.ct0 || '')) ? (a.xCt0 || ext?.ct0) : require('crypto').randomBytes(16).toString('hex');
   const at = Date.now();
   try {
     const r = await fetch(X_VIEWER_URL, {
@@ -419,20 +433,23 @@ async function runProbes(accs, which) {
     const batch = accs.slice(i, i + CONC);
     await Promise.all(batch.map(async (a, k) => {
       if (anyDirect && k) await sleep(400 * k + Math.random() * 300);
-      const row = { id: a.id, name: a.name };
-      if (which === 'discord' || which === 'all') row.discord = await testDiscord(a.id);
-      if (which === 'x' || which === 'all') row.x = await testX(a.id);
-      if (which === 'gmail' || which === 'all') row.gmail = await testGmailImap(a.id);
+      const row = { id: a.id, name: a.name, skipped: [] };
+      // Discord/X are optional. Probe only credentials that actually exist.
+      if ((which === 'discord' || which === 'all') && a.discordToken) row.discord = await testDiscord(a.id);
+      else if (which === 'discord' || which === 'all') row.skipped.push('discord');
+      if ((which === 'x' || which === 'all') && a.hasXToken) row.x = await testX(a.id);
+      else if (which === 'x' || which === 'all') row.skipped.push('x');
+      row.tested = !!(row.discord || row.x);
       if (which !== 'all') {
         const r = row[which] || {};
-        row.ok = !!r.ok;
-        row.state = r.state || (r.ok ? 'ok' : 'error');
+        row.ok = !row.tested || !!r.ok;
+        row.state = r.state || (row.tested ? (r.ok ? 'ok' : 'error') : 'no_token');
         if (r.error) row.error = r.error;
         if (r.handle) row.handle = r.handle;
         if (r.followers != null) row.followers = r.followers;
         if (r.username) row.username = r.username;
       } else {
-        row.ok = ['discord', 'x', 'gmail'].every((k) => !row[k] || row[k].ok);
+        row.ok = [row.discord, row.x].every((r) => !r || r.ok);
       }
       out.push(row);
     }));
